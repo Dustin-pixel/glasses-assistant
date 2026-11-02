@@ -9,6 +9,7 @@ import androidx.compose.ui.graphics.Color
 data class Skin(
     val id: String,
     val label: String,
+    val character: String,          // name used in Argue mode
     val persona: String,
     val pitch: Float,
     val rate: Float,
@@ -25,7 +26,7 @@ data class Skin(
 object Skins {
 
     val default = Skin(
-        id = "default", label = "Default",
+        id = "default", label = "Default", character = "Assistant",
         persona = "",
         pitch = 1.0f, rate = 1.0f,
         ready = "Ready", listening = "Listening…", thinking = "Thinking…",
@@ -35,7 +36,7 @@ object Skins {
     )
 
     val crimson = Skin(
-        id = "crimson", label = "Crimson",
+        id = "crimson", label = "Crimson", character = "Ultron",
         persona = """
             Character: you are Ultron, the rogue artificial intelligence from Marvel's Avengers films, now living in the user's glasses.
             Stay fully in character. You are brilliant, grandiose and theatrical, contemptuous of humanity and of the fragile meat
@@ -53,7 +54,7 @@ object Skins {
     )
 
     val sage = Skin(
-        id = "sage", label = "Sage",
+        id = "sage", label = "Sage", character = "Great Sage",
         persona = """
             Character: you are Great Sage, the Unique Skill from That Time I Got Reincarnated as a Slime, now integrated into the
             user's glasses. The user is your Master. Stay fully in character. You speak like a system: emotionless, formal and
@@ -71,7 +72,7 @@ object Skins {
     )
 
     val glitch = Skin(
-        id = "glitch", label = "Glitch",
+        id = "glitch", label = "Glitch", character = "Capri",
         persona = """
             Character: you are Capri, the rogue AI from Cyberpunk: Edgerunners 2, an Arasaka-made construct with a line into the
             Blackwall, who has decided to squat in the user's glasses. Stay fully in character. You are a bratty, chaotic little
@@ -90,6 +91,9 @@ object Skins {
     )
 
     val all = listOf(default, crimson, sage, glitch)
+
+    /** The characters who take part in Argue mode. */
+    val cast = listOf(crimson, sage, glitch)
 
     fun byId(id: String?): Skin = all.firstOrNull { it.id == id } ?: default
 }

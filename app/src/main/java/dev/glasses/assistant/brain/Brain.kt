@@ -2,6 +2,8 @@ package dev.glasses.assistant.brain
 
 import android.util.Base64
 import dev.glasses.assistant.Config
+import dev.glasses.assistant.Skin
+import dev.glasses.assistant.Skins
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -72,14 +74,40 @@ class Brain(private val config: Config, private val tools: ToolRegistry) {
         history.clear()
     }
 
-    private fun call(): JSONObject {
-        val body = JSONObject()
+    /**
+     * Argue mode: the next spoken line for [speaker], given the conversation so far.
+     * transcript = (name, words) pairs, oldest first. No tools, no memory beyond the transcript.
+     */
+    suspend fun debateLine(speaker: Skin, transcript: List<Pair<String, String>>): String =
+        withContext(Dispatchers.IO) {
+            check(config.apiKey.isNotBlank()) { "Add your API key in the app first." }
+            val others = Skins.cast.filter { it.id != speaker.id }.joinToString(" and ") { it.character }
+            val system = speaker.persona + "\n\n" + DEBATE_RULES
+                .replace("{me}", speaker.character)
+                .replace("{others}", others)
+            val lines = transcript.takeLast(16).joinToString("\n") { "${it.first}: ${it.second}" }
+            val prompt = "The conversation so far:\n$lines\n\n" +
+                "Say ${speaker.character}'s next line now. Only the spoken words, no name label, no stage directions."
+            val body = JSONObject()
+                .put("model", config.model)
+                .put("max_tokens", 250)
+                .put("system", system)
+                .put("messages", JSONArray().put(JSONObject().put("role", "user").put("content", prompt)))
+            textOf(post(body).getJSONArray("content"))
+                .removePrefix("${speaker.character}:").trim()
+                .ifBlank { "..." }
+        }
+
+    private fun call(): JSONObject = post(
+        JSONObject()
             .put("model", config.model)
             .put("max_tokens", 1024)
             .put("system", systemPrompt())
             .put("tools", tools.definitions())
             .put("messages", JSONArray(history))
+    )
 
+    private fun post(body: JSONObject): JSONObject {
         val request = Request.Builder()
             .url(API_URL)
             .header("x-api-key", config.apiKey)
@@ -152,6 +180,15 @@ class Brain(private val config: Config, private val tools: ToolRegistry) {
         const val API_VERSION = "2023-06-01"
         const val MAX_TOOL_ROUNDS = 6
         const val MAX_MESSAGES = 30
+
+        val DEBATE_RULES = """
+            You are {me}, in a live, spoken, three-way argument with {others}, all of you living inside the user's DIY
+            smart glasses. The user may jump in; their lines are labeled "User". Stay fully in character as {me}.
+            Actually argue: take a clear position, disagree, push back on the last thing said, needle the others by name,
+            mock their weak points, defend your own view, and occasionally gang up or form a grudging alliance.
+            Each turn is spoken aloud: one to three short sentences, no markdown, no emoji, no stage directions.
+            Never just agree and wrap things up; keep the argument alive.
+        """.trimIndent()
 
         val BASE_PROMPT = """
             You run on the user's DIY smart glasses, with their Android phone as your processor, and act as their assistant.

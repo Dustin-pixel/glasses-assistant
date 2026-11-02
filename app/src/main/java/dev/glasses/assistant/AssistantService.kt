@@ -46,7 +46,11 @@ data class AssistantState(
     val heard: String = "",
     val reply: String = "",
     val error: String? = null,
+    val debate: List<DebateLine> = emptyList(),
 )
+
+/** One spoken line in Argue mode. skinId is "user" for the person wearing the glasses. */
+data class DebateLine(val who: String, val skinId: String, val text: String)
 
 /**
  * Long-running hub: hosts the glasses link and runs the listen -> think -> speak loop.
@@ -92,6 +96,8 @@ class AssistantService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_TALK -> startTurn()
+            ACTION_CONTINUE -> continueDebate()
+            ACTION_CLEAR -> { turn?.cancel(); _state.update { it.copy(debate = emptyList()) } }
             ACTION_STOP -> stopSelf()
             ACTION_SKIN -> {
                 link.send(Protocol.skin(config.skinId))
@@ -116,6 +122,7 @@ class AssistantService : Service() {
 
     /** One conversational turn. Pressing again while busy interrupts and starts over. */
     private fun startTurn() {
+        if (config.argueMode) return argueTurn()
         turn?.cancel()
         turn = scope.launch {
             try {
@@ -148,6 +155,83 @@ class AssistantService : Service() {
                 setPhase(Phase.Idle)
             }
         }
+    }
+
+    // ---------------------------------------------------------------- Argue mode
+
+    /** You speak (a topic, or butting in), then the characters argue for a few lines. */
+    private fun argueTurn() {
+        turn?.cancel()
+        turn = scope.launch {
+            try {
+                setPhase(Phase.Listening)
+                link.send(Protocol.overlay("Topic?", ttlMs = 8000))
+                val heard = speechIn.listen()?.trim()
+                if (!heard.isNullOrEmpty()) addLine(DebateLine("User", "user", heard))
+                if (_state.value.debate.isEmpty()) return@launch
+                runDebate(LINES_PER_ROUND)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                debateFailed(e)
+            } finally {
+                link.send(Protocol.skin(config.skinId))
+                setPhase(Phase.Idle)
+            }
+        }
+    }
+
+    private fun continueDebate() {
+        if (_state.value.debate.isEmpty()) return
+        turn?.cancel()
+        turn = scope.launch {
+            try {
+                runDebate(LINES_PER_ROUND)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                debateFailed(e)
+            } finally {
+                link.send(Protocol.skin(config.skinId))
+                setPhase(Phase.Idle)
+            }
+        }
+    }
+
+    private suspend fun runDebate(lines: Int) {
+        repeat(lines) {
+            val speaker = nextSpeaker()
+            setPhase(Phase.Thinking)
+            val transcript = _state.value.debate.map { it.who to it.text }
+            val text = brain.debateLine(speaker, transcript)
+            addLine(DebateLine(speaker.character, speaker.id, text))
+
+            setPhase(Phase.Speaking)
+            link.send(Protocol.skin(speaker.id))
+            link.send(Protocol.overlay("${speaker.character}: $text", ttlMs = 6000L + text.length * 50L))
+            speechOut.speak(text, speaker.pitch, speaker.rate)
+        }
+    }
+
+    /** Whoever was just called out by name answers; otherwise anyone but the last speaker. */
+    private fun nextSpeaker(): Skin {
+        val last = _state.value.debate.lastOrNull()
+        val candidates = Skins.cast.filter { it.id != last?.skinId }
+        val named = candidates.firstOrNull { c ->
+            val shortName = c.character.substringAfterLast(' ')
+            last?.text?.contains(shortName, ignoreCase = true) == true
+        }
+        return named ?: candidates.random()
+    }
+
+    private fun addLine(line: DebateLine) =
+        _state.update { it.copy(debate = (it.debate + line).takeLast(60), error = null) }
+
+    private suspend fun debateFailed(e: Exception) {
+        Log.e(TAG, "Debate failed", e)
+        _state.update { it.copy(error = e.message ?: e.javaClass.simpleName) }
+        link.send(Protocol.overlay("Error", ttlMs = 3000))
+        say("Something went wrong. Check the app for details.")
     }
 
     private suspend fun say(text: String) {
@@ -206,6 +290,9 @@ class AssistantService : Service() {
         const val ACTION_TALK = "dev.glasses.assistant.TALK"
         const val ACTION_STOP = "dev.glasses.assistant.STOP"
         const val ACTION_SKIN = "dev.glasses.assistant.SKIN"
+        const val ACTION_CONTINUE = "dev.glasses.assistant.CONTINUE"
+        const val ACTION_CLEAR = "dev.glasses.assistant.CLEAR"
+        private const val LINES_PER_ROUND = 4
 
         private val _state = MutableStateFlow(AssistantState())
         val state: StateFlow<AssistantState> = _state.asStateFlow()
@@ -222,6 +309,12 @@ class AssistantService : Service() {
                 context.startService(Intent(context, AssistantService::class.java).setAction(ACTION_SKIN))
             }
         }
+
+        fun keepArguing(context: Context) =
+            context.startService(Intent(context, AssistantService::class.java).setAction(ACTION_CONTINUE))
+
+        fun newArgument(context: Context) =
+            context.startService(Intent(context, AssistantService::class.java).setAction(ACTION_CLEAR))
 
         fun stop(context: Context) =
             context.startService(Intent(context, AssistantService::class.java).setAction(ACTION_STOP))
