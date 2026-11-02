@@ -20,6 +20,7 @@
 
     <application
         android:allowBackup="false"
+        android:icon="@drawable/ic_app"
         android:label="Glasses Assistant"
         android:theme="@android:style/Theme.Material.NoActionBar">
 
@@ -36,16 +37,12 @@
         <meta-data
             android:name="com.google.android.gms.car.application"
             android:resource="@xml/automotive_app_desc" />
-        <meta-data
-            android:name="androidx.car.app.minCarApiLevel"
-            android:value="1" />
-
+        <!-- A media app, because Android Auto's "Unknown sources" covers media apps for sideloaded builds -->
         <service
-            android:name=".car.GlassesCarAppService"
+            android:name=".car.CarMediaService"
             android:exported="true">
             <intent-filter>
-                <action android:name="androidx.car.app.CarAppService" />
-                <category android:name="androidx.car.app.category.POI" />
+                <action android:name="android.media.browse.MediaBrowserService" />
             </intent-filter>
         </service>
 

@@ -97,6 +97,8 @@ class AssistantService : Service() {
         when (intent?.action) {
             ACTION_TALK -> startTurn()
             ACTION_CONTINUE -> continueDebate()
+            ACTION_ASK -> intent.getStringExtra(EXTRA_TEXT)?.trim()?.takeIf { it.isNotEmpty() }?.let { askText(it) }
+            ACTION_HUSH -> turn?.cancel()
             ACTION_CLEAR -> { turn?.cancel(); _state.update { it.copy(debate = emptyList()) } }
             ACTION_STOP -> stopSelf()
             ACTION_SKIN -> {
@@ -135,15 +137,7 @@ class AssistantService : Service() {
                     return@launch
                 }
 
-                _state.update { it.copy(heard = heard, error = null) }
-                setPhase(Phase.Thinking)
-                link.send(Protocol.overlay(skin.thinking, ttlMs = 30_000))
-                val reply = brain.ask(heard)
-
-                _state.update { it.copy(reply = reply) }
-                setPhase(Phase.Speaking)
-                link.send(Protocol.overlay(reply, ttlMs = 6000L + reply.length * 50L))
-                say(reply)
+                respond(heard)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -152,6 +146,42 @@ class AssistantService : Service() {
                 link.send(Protocol.overlay("Error", ttlMs = 3000))
                 say("Something went wrong. Check the app for details.")
             } finally {
+                setPhase(Phase.Idle)
+            }
+        }
+    }
+
+    /** Assistant mode: think about what was said and answer it. */
+    private suspend fun respond(heard: String) {
+        val skin = config.skin
+        _state.update { it.copy(heard = heard, error = null) }
+        setPhase(Phase.Thinking)
+        link.send(Protocol.overlay(skin.thinking, ttlMs = 30_000))
+        val reply = brain.ask(heard)
+
+        _state.update { it.copy(reply = reply) }
+        setPhase(Phase.Speaking)
+        link.send(Protocol.overlay(reply, ttlMs = 6000L + reply.length * 50L))
+        say(reply)
+    }
+
+    /** Text that arrived already transcribed (e.g. "Hey Google, play … on Glasses Assistant" in the car). */
+    private fun askText(text: String) {
+        turn?.cancel()
+        turn = scope.launch {
+            try {
+                if (config.argueMode) {
+                    addLine(DebateLine("User", "user", text))
+                    runDebate(LINES_PER_ROUND)
+                } else {
+                    respond(text)
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                debateFailed(e)
+            } finally {
+                link.send(Protocol.skin(config.skinId))
                 setPhase(Phase.Idle)
             }
         }
@@ -292,6 +322,9 @@ class AssistantService : Service() {
         const val ACTION_SKIN = "dev.glasses.assistant.SKIN"
         const val ACTION_CONTINUE = "dev.glasses.assistant.CONTINUE"
         const val ACTION_CLEAR = "dev.glasses.assistant.CLEAR"
+        const val ACTION_ASK = "dev.glasses.assistant.ASK"
+        const val ACTION_HUSH = "dev.glasses.assistant.HUSH"
+        const val EXTRA_TEXT = "text"
         private const val LINES_PER_ROUND = 4
 
         private val _state = MutableStateFlow(AssistantState())
@@ -309,6 +342,14 @@ class AssistantService : Service() {
                 context.startService(Intent(context, AssistantService::class.java).setAction(ACTION_SKIN))
             }
         }
+
+        fun ask(context: Context, text: String) =
+            context.startService(
+                Intent(context, AssistantService::class.java).setAction(ACTION_ASK).putExtra(EXTRA_TEXT, text)
+            )
+
+        fun hush(context: Context) =
+            context.startService(Intent(context, AssistantService::class.java).setAction(ACTION_HUSH))
 
         fun keepArguing(context: Context) =
             context.startService(Intent(context, AssistantService::class.java).setAction(ACTION_CONTINUE))

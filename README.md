@@ -85,4 +85,9 @@ Argue mode puts all three characters in one conversation.
 
 1. In the Android Auto app on your phone, open settings and tap **Version** about 10 times to unlock developer mode.
 2. From the three-dot menu open **Developer settings** and turn on **Unknown sources**.
-3. Start the assistant on your phone, then plug in or connect to the car. **Glasses Assistant** appears in the car's app list.
+3. Start the assistant on your phone, then connect to the car. **Glasses Assistant** appears with the car's media apps.
+
+In the car it works like a music app: a **Controls** tab (Talk, mode, Keep arguing, New argument, Stop talking)
+and a **Characters** tab. The now-playing screen shows who is talking and what they said.
+You can also say **"Hey Google, play *anything* on Glasses Assistant"**: your words go straight in as a question,
+a topic, or a line in the argument, using the car's microphone.
