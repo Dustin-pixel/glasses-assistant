@@ -91,3 +91,13 @@ In the car it works like a music app: a **Controls** tab (Talk, mode, Keep argui
 and a **Characters** tab. The now-playing screen shows who is talking and what they said.
 You can also say **"Hey Google, play *anything* on Glasses Assistant"**: your words go straight in as a question,
 a topic, or a line in the argument, using the car's microphone.
+
+## Windows app
+
+`desktop/` is a native Windows version (C#/WPF, .NET 8) with the same skins, personas, Argue mode and voice effects.
+It uses Windows' own speech recognition and voices, and adds a `look_at_screen` tool so the assistant can see your monitor.
+Press **Ctrl+Alt+Space** anywhere to talk. GitHub builds a single `GlassesAssistant-N.exe` on the Releases page.
+
+First run: paste your Claude API key under Settings and tap Save (it's stored encrypted for your Windows account).
+For voice input, turn on **Settings > Privacy & security > Speech > Online speech recognition** and allow
+desktop apps to use the microphone.

@@ -1,0 +1,43 @@
+name: Build Windows app
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "desktop/**"
+      - ".github/workflows/build-windows.yml"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write   # to publish the .exe as a release
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Build single-file exe
+        shell: pwsh
+        run: >
+          dotnet publish desktop/GlassesAssistant/GlassesAssistant.csproj
+          -c Release -r win-x64 --self-contained true
+          -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
+          -p:Version=0.1.${{ github.run_number }}
+          -o out
+
+      - name: Rename exe
+        shell: pwsh
+        run: Copy-Item out/GlassesAssistant.exe "GlassesAssistant-${{ github.run_number }}.exe"
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: windows-${{ github.run_number }}
+          name: Windows build ${{ github.run_number }}
+          body: Windows desktop app from ${{ github.sha }}. Download the .exe below and run it.
+          files: GlassesAssistant-${{ github.run_number }}.exe
