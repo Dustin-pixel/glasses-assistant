@@ -18,6 +18,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -39,16 +40,33 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        val config = Config(this)
         setContent {
-            MaterialTheme(colorScheme = darkColorScheme()) {
-                Surface(Modifier.fillMaxSize()) { HomeScreen() }
+            var skinId by remember { mutableStateOf(config.skinId) }
+            val skin = Skins.byId(skinId)
+            val colors = darkColorScheme(
+                primary = skin.accent, onPrimary = skin.background,
+                secondaryContainer = skin.accent, onSecondaryContainer = skin.background,
+                background = skin.background, onBackground = skin.text,
+                surface = skin.background, onSurface = skin.text,
+                surfaceVariant = skin.surface, onSurfaceVariant = skin.text,
+                outline = skin.accent.copy(alpha = 0.5f),
+            )
+            MaterialTheme(colorScheme = colors) {
+                Surface(Modifier.fillMaxSize()) {
+                    HomeScreen(skinId) { id ->
+                        skinId = id
+                        config.skinId = id
+                        AssistantService.skinChanged(this@MainActivity)
+                    }
+                }
             }
         }
     }
 }
 
 @Composable
-private fun HomeScreen() {
+private fun HomeScreen(skinId: String, onSkin: (String) -> Unit) {
     val context = LocalContext.current
     val config = remember { Config(context) }
     val state by AssistantService.state.collectAsStateWithLifecycle()
@@ -79,6 +97,16 @@ private fun HomeScreen() {
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         Text("Glasses Assistant", style = MaterialTheme.typography.headlineMedium)
+
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Skins.all.forEach { s ->
+                FilterChip(
+                    selected = s.id == skinId,
+                    onClick = { onSkin(s.id) },
+                    label = { Text(s.label) },
+                )
+            }
+        }
 
         Card(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {

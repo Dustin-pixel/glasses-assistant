@@ -53,6 +53,7 @@ class Display:
 
     def __init__(self):
         self._clear_task = None
+        self.skin = "default"
 
     def show(self, text: str, pos: str, ttl_ms: int):
         print(f"[display:{pos}] {text}")
@@ -92,6 +93,9 @@ async def handle_messages(ws, camera: Camera, display: Display):
             display.show(msg.get("text", ""), msg.get("pos", "bottom"), int(msg.get("ttl_ms", 6000)))
         elif kind == "clear":
             display.clear()
+        elif kind == "skin":
+            display.skin = msg.get("name", "default")  # TODO: pick colors/fonts per skin when drawing
+            print(f"[display] skin -> {display.skin}")
 
 
 async def button_presses(ws):

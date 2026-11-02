@@ -15,6 +15,12 @@ class Config(context: Context) {
         get() = prefs.getString(KEY_MODEL, DEFAULT_MODEL) ?: DEFAULT_MODEL
         set(value) = prefs.edit().putString(KEY_MODEL, value.trim()).apply()
 
+    var skinId: String
+        get() = prefs.getString(KEY_SKIN, Skins.default.id) ?: Skins.default.id
+        set(value) = prefs.edit().putString(KEY_SKIN, value).apply()
+
+    val skin: Skin get() = Skins.byId(skinId)
+
     /** Shared secret the glasses must send in their hello, so random hotspot clients can't connect. */
     val linkToken: String
         get() = prefs.getString(KEY_TOKEN, null) ?: UUID.randomUUID().toString().take(8).also {
@@ -27,5 +33,6 @@ class Config(context: Context) {
         private const val KEY_API = "api_key"
         private const val KEY_MODEL = "model"
         private const val KEY_TOKEN = "link_token"
+        private const val KEY_SKIN = "skin"
     }
 }

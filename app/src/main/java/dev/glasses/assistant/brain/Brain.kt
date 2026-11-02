@@ -27,11 +27,14 @@ class Brain(private val config: Config, private val tools: ToolRegistry) {
         .build()
     private val history = mutableListOf<JSONObject>()
     private val mutex = Mutex()
+    private var historySkin: String? = null
 
     suspend fun ask(userText: String): String = mutex.withLock {
         withContext(Dispatchers.IO) {
             check(config.apiKey.isNotBlank()) { "Add your API key in the app first." }
 
+            // A new character starts a fresh conversation, so the old voice doesn't leak in.
+            if (historySkin != config.skinId) { history.clear(); historySkin = config.skinId }
             val rollback = history.size
             stripOldImages()
             history.add(JSONObject().put("role", "user").put("content", userText))
@@ -73,7 +76,7 @@ class Brain(private val config: Config, private val tools: ToolRegistry) {
         val body = JSONObject()
             .put("model", config.model)
             .put("max_tokens", 1024)
-            .put("system", SYSTEM_PROMPT)
+            .put("system", systemPrompt())
             .put("tools", tools.definitions())
             .put("messages", JSONArray(history))
 
@@ -139,16 +142,21 @@ class Brain(private val config: Config, private val tools: ToolRegistry) {
         }
     }
 
+    private fun systemPrompt(): String {
+        val persona = config.skin.persona
+        return if (persona.isBlank()) BASE_PROMPT else "$persona\n\n$BASE_PROMPT"
+    }
+
     private companion object {
         const val API_URL = "https://api.anthropic.com/v1/messages"
         const val API_VERSION = "2023-06-01"
         const val MAX_TOOL_ROUNDS = 6
         const val MAX_MESSAGES = 30
 
-        val SYSTEM_PROMPT = """
-            You are a personal assistant running on the user's DIY smart glasses, with their Android phone as your processor.
-            Your replies are spoken aloud through earbuds, so keep them short and natural: usually one to three sentences,
-            no markdown, no lists, no emoji. Get to the point.
+        val BASE_PROMPT = """
+            You run on the user's DIY smart glasses, with their Android phone as your processor, and act as their assistant.
+            Your replies are spoken aloud through earbuds, so keep them short: usually one to three sentences, no markdown,
+            no lists, no emoji. Stay in your character's voice the whole time, but get the actual answer across.
             You can see through the glasses camera with the look tool; use it whenever the user refers to something in view.
             Use show_on_display for anything easier to read than hear, such as numbers, directions or codes.
             If a tool fails, say so briefly and carry on.

@@ -77,8 +77,9 @@ class AssistantService : Service() {
                 ShowOnDisplayTool(link),
                 TimeTool(),
                 TimerTool(scope) { label ->
-                    link.send(Protocol.overlay("⏰ $label done", ttlMs = 15_000, pos = "top"))
-                    speechOut.speak("Your $label timer is done.")
+                    val msg = config.skin.timerDone(label)
+                    link.send(Protocol.overlay(msg, ttlMs = 15_000, pos = "top"))
+                    say(msg)
                 },
             )
         )
@@ -92,6 +93,10 @@ class AssistantService : Service() {
         when (intent?.action) {
             ACTION_TALK -> startTurn()
             ACTION_STOP -> stopSelf()
+            ACTION_SKIN -> {
+                link.send(Protocol.skin(config.skinId))
+                link.send(Protocol.overlay(config.skin.ready, ttlMs = 2000))
+            }
         }
         return START_STICKY
     }
@@ -100,7 +105,8 @@ class AssistantService : Service() {
         when (event) {
             is LinkEvent.Connected -> {
                 _state.update { it.copy(glasses = event.device) }
-                link.send(Protocol.overlay("Connected", ttlMs = 2000))
+                link.send(Protocol.skin(config.skinId))
+                link.send(Protocol.overlay(config.skin.ready, ttlMs = 2000))
             }
             LinkEvent.Disconnected -> _state.update { it.copy(glasses = null) }
             LinkEvent.ButtonPressed -> startTurn()
@@ -114,7 +120,8 @@ class AssistantService : Service() {
         turn = scope.launch {
             try {
                 setPhase(Phase.Listening)
-                link.send(Protocol.overlay("Listening…", ttlMs = 8000))
+                val skin = config.skin
+                link.send(Protocol.overlay(skin.listening, ttlMs = 8000))
                 val heard = speechIn.listen()?.trim()
                 if (heard.isNullOrEmpty()) {
                     link.send(Protocol.clear())
@@ -123,24 +130,29 @@ class AssistantService : Service() {
 
                 _state.update { it.copy(heard = heard, error = null) }
                 setPhase(Phase.Thinking)
-                link.send(Protocol.overlay("…", ttlMs = 30_000))
+                link.send(Protocol.overlay(skin.thinking, ttlMs = 30_000))
                 val reply = brain.ask(heard)
 
                 _state.update { it.copy(reply = reply) }
                 setPhase(Phase.Speaking)
                 link.send(Protocol.overlay(reply, ttlMs = 6000L + reply.length * 50L))
-                speechOut.speak(reply)
+                say(reply)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 Log.e(TAG, "Turn failed", e)
                 _state.update { it.copy(error = e.message ?: e.javaClass.simpleName) }
                 link.send(Protocol.overlay("Error", ttlMs = 3000))
-                speechOut.speak("Sorry, something went wrong.")
+                say("Something went wrong. Check the app for details.")
             } finally {
                 setPhase(Phase.Idle)
             }
         }
+    }
+
+    private suspend fun say(text: String) {
+        val skin = config.skin
+        speechOut.speak(text, skin.pitch, skin.rate)
     }
 
     private fun setPhase(phase: Phase) = _state.update { it.copy(phase = phase) }
@@ -193,6 +205,7 @@ class AssistantService : Service() {
         private const val NOTIFICATION_ID = 1
         const val ACTION_TALK = "dev.glasses.assistant.TALK"
         const val ACTION_STOP = "dev.glasses.assistant.STOP"
+        const val ACTION_SKIN = "dev.glasses.assistant.SKIN"
 
         private val _state = MutableStateFlow(AssistantState())
         val state: StateFlow<AssistantState> = _state.asStateFlow()
@@ -202,6 +215,13 @@ class AssistantService : Service() {
 
         fun talk(context: Context) =
             context.startService(Intent(context, AssistantService::class.java).setAction(ACTION_TALK))
+
+        /** Tell a running service the skin changed, so the glasses restyle. */
+        fun skinChanged(context: Context) {
+            if (state.value.running) {
+                context.startService(Intent(context, AssistantService::class.java).setAction(ACTION_SKIN))
+            }
+        }
 
         fun stop(context: Context) =
             context.startService(Intent(context, AssistantService::class.java).setAction(ACTION_STOP))

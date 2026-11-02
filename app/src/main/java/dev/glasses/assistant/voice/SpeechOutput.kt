@@ -19,8 +19,10 @@ class SpeechOutput(context: Context) : TextToSpeech.OnInitListener {
     }
 
     /** Speaks and suspends until finished (or cancelled). */
-    suspend fun speak(text: String) {
+    suspend fun speak(text: String, pitch: Float = 1f, rate: Float = 1f) {
         if (!ready || text.isBlank()) return
+        tts.setPitch(pitch)
+        tts.setSpeechRate(rate)
         suspendCancellableCoroutine { cont ->
             val id = UUID.randomUUID().toString()
             tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
