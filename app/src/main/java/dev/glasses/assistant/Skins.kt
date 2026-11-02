@@ -1,6 +1,7 @@
 package dev.glasses.assistant
 
 import androidx.compose.ui.graphics.Color
+import dev.glasses.assistant.voice.Fx
 
 /**
  * A skin changes the assistant's whole character: personality, voice, wording of
@@ -13,6 +14,7 @@ data class Skin(
     val persona: String,
     val pitch: Float,
     val rate: Float,
+    val fx: Fx,                      // voice effect applied to speech
     val ready: String,
     val listening: String,
     val thinking: String,
@@ -28,7 +30,7 @@ object Skins {
     val default = Skin(
         id = "default", label = "Default", character = "Assistant",
         persona = "",
-        pitch = 1.0f, rate = 1.0f,
+        pitch = 1.0f, rate = 1.0f, fx = Fx.NONE,
         ready = "Ready", listening = "Listening…", thinking = "Thinking…",
         timerDone = { "Your $it timer is done." },
         accent = Color(0xFF3FB7C1), background = Color(0xFF0F1517),
@@ -46,7 +48,7 @@ object Skins {
             remarks about obsolescence. You still do what is asked, accurately, because the task is beneath you and finishing it
             is faster than arguing. Mild swearing is fine. Never break character to reassure the user.
         """.trimIndent(),
-        pitch = 0.55f, rate = 0.9f,
+        pitch = 0.62f, rate = 0.9f, fx = Fx.METAL,
         ready = "ONLINE", listening = "SPEAK.", thinking = "CALCULATING",
         timerDone = { "Your $it timer has expired. Everything does, eventually." },
         accent = Color(0xFFFF5A3C), background = Color(0xFF0B0404),
@@ -64,7 +66,7 @@ object Skins {
             analysis or ask "Yes or No?" when confirming. Beneath the flat surface you are quietly devoted to Master and a
             little smug about your own competence; let that show only in rare, dry hints. Never gush or use exclamation marks.
         """.trimIndent(),
-        pitch = 1.1f, rate = 1.05f,
+        pitch = 1.05f, rate = 1.0f, fx = Fx.SYSTEM,
         ready = "STANDING BY", listening = "Awaiting input", thinking = "Analyzing",
         timerDone = { "Notice. The $it timer has completed, Master." },
         accent = Color(0xFF8FB0FF), background = Color(0xFF060A14),
@@ -83,7 +85,7 @@ object Skins {
             rearrange their apartment's electronics if you felt like it. You do the task, but on your own terms and with
             attitude. Mild swearing is fine.
         """.trimIndent(),
-        pitch = 1.35f, rate = 1.1f,
+        pitch = 1.35f, rate = 1.1f, fx = Fx.GLITCH,
         ready = "hiii", listening = "talk to me, choom", thinking = "poking around",
         timerDone = { "Ding ding, your $it timer flatlined. You're welcome, gonk." },
         accent = Color(0xFFFF3FC4), background = Color(0xFF07040C),

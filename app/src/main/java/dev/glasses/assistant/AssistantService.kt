@@ -209,7 +209,7 @@ class AssistantService : Service() {
             setPhase(Phase.Speaking)
             link.send(Protocol.skin(speaker.id))
             link.send(Protocol.overlay("${speaker.character}: $text", ttlMs = 6000L + text.length * 50L))
-            speechOut.speak(text, speaker.pitch, speaker.rate)
+            speechOut.speak(text, speaker.pitch, speaker.rate, speaker.fx)
         }
     }
 
@@ -236,7 +236,7 @@ class AssistantService : Service() {
 
     private suspend fun say(text: String) {
         val skin = config.skin
-        speechOut.speak(text, skin.pitch, skin.rate)
+        speechOut.speak(text, skin.pitch, skin.rate, skin.fx)
     }
 
     private fun setPhase(phase: Phase) = _state.update { it.copy(phase = phase) }

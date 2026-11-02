@@ -73,3 +73,16 @@ Implement `Tool` (name, description, JSON schema, `run`) and add it to the list 
 - **More tools**: notifications (NotificationListenerService), navigation, calendar, messages, smart home.
 - **Local fallback**: a small on-device model for simple commands when offline.
 - The API key is stored unencrypted in app preferences. Fine for a personal build; use EncryptedSharedPreferences or a keystore before sharing the app.
+
+## Skins and voices
+
+Default, Crimson (Ultron), Sage (Great Sage) and Glitch (Capri). Each skin sets the personality,
+the app colors, the glasses display style and a voice effect (`voice/VoiceFx.kt`): Crimson is
+doubled and metallic, Sage is thin and synthetic with an echo, Glitch stutters and crunches.
+Argue mode puts all three characters in one conversation.
+
+## Android Auto
+
+1. In the Android Auto app on your phone, open settings and tap **Version** about 10 times to unlock developer mode.
+2. From the three-dot menu open **Developer settings** and turn on **Unknown sources**.
+3. Start the assistant on your phone, then plug in or connect to the car. **Glasses Assistant** appears in the car's app list.
