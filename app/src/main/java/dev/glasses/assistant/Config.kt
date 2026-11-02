@@ -22,7 +22,7 @@ class Config(context: Context) {
         }
 
     companion object {
-        const val DEFAULT_MODEL = "claude-sonnet-5-5"
+        const val DEFAULT_MODEL = "claude-haiku-5-5"
         const val LINK_PORT = 8765
         private const val KEY_API = "api_key"
         private const val KEY_MODEL = "model"
