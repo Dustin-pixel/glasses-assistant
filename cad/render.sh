@@ -35,14 +35,30 @@ for p in clip arm eyepiece sled front_cap battery_clip screen_board screen_glass
   fi
 done
 
-echo "== Interference checks (EMPTY = parts don't overlap) ==" >> "$REPORT"
+echo "== Interference checks (EMPTY or TOUCH = fine, OVERLAP = parts collide) ==" >> "$REPORT"
 for c in eyepiece-sled-near eyepiece-sled-far cap-sled-far cap-board-far eyepiece-cap eyepiece-lens \
          eyepiece-board eyepiece-glass sled-board sled-glass lens-glass-near cap-xiao cap-camera \
          eyepiece-xiao board-xiao-far arm-eyepiece arm-clip arm-glasses clip-glasses eyepiece-glasses \
          eyepiece-eye batclip-glasses batclip-battery batclip-clip; do
   run "$OUT/checks/$c.stl" "check_$c"
   if [ -s "$OUT/checks/$c.stl" ]; then
-    echo "OVERLAP $c" >> "$REPORT"
+    # faces that only touch leave a zero-thickness result; real overlaps have volume
+    t=$(python3 - "$OUT/checks/$c.stl" <<'PY'
+import struct, sys
+b = open(sys.argv[1], "rb").read(); n = struct.unpack_from("<I", b, 80)[0]
+lo = [1e9]*3; hi = [-1e9]*3
+for i in range(n):
+    for k in range(3):
+        p = struct.unpack_from("<3f", b, 84 + i*50 + 12 + 12*k)
+        for a in range(3): lo[a] = min(lo[a], p[a]); hi[a] = max(hi[a], p[a])
+print("%.2f" % min(hi[a] - lo[a] for a in range(3)))
+PY
+)
+    if python3 -c "import sys; sys.exit(0 if float('$t') < 0.01 else 1)"; then
+      echo "TOUCH   $c" >> "$REPORT"
+    else
+      echo "OVERLAP $c  ($t mm deep)" >> "$REPORT"; FAIL=1
+    fi
   else
     echo "EMPTY   $c" >> "$REPORT"
   fi
@@ -68,7 +84,7 @@ for f in sorted(os.listdir(d)):
         (x1,y1,z1),(x2,y2,z2),(x3,y3,z3) = v
         vol += (x1*(y2*z3-y3*z2) - x2*(y1*z3-y3*z1) + x3*(y1*z2-y2*z1)) / 6
     size = [hi[a]-lo[a] for a in range(3)]
-    print(f"{f:18s} {size[0]:6.1f} x {size[1]:6.1f} x {size[2]:6.1f}   {abs(vol)/1000:5.1f} cm3  ~{abs(vol)/1000*1.27*0.45:4.1f} g PETG at 45% fill")
+    print(f"{f:18s} {size[0]:6.1f} x {size[1]:6.1f} x {size[2]:6.1f}   {abs(vol)/1000:5.1f} cm3  {abs(vol)/1000*1.27:5.1f} g in PETG (thin walls print nearly solid)")
 PY
 
 echo "== Images ==" >> "$REPORT"

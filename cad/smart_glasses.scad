@@ -69,7 +69,8 @@ cam_dz = 0;
 bat_l = 40; bat_w = 25; bat_t = 8.5;
 
 // ---------- PRINT / HARDWARE ----------
-wall      = 2.0;
+wall      = 2.0;      // clips
+tube_wall = 1.6;      // eyepiece tube (4 lines at 0.4 mm)
 fit       = 0.3;      // clearance for sliding fits
 snap      = 1.0;      // clip opening is this much narrower than the temple
 bolt_d    = 2.3;      // M2 clearance
@@ -118,8 +119,9 @@ cam_front = EL - cap_wall;                                     // camera lens ti
 sense_front = xiao_back + xiao_can + xiao_pcb + sense_gap + sense_pcb;
 cam_h     = cam_front - sense_front;                           // camera height above its board
 
-ty0 = -bay_w / 2 - wall;  ty1 = bay_w / 2 + wall;              // tube outside, local
-tz0 = bay_z0 - wall;      tz1 = bay_z1 + wall;
+ty0 = -bay_w / 2 - tube_wall;  ty1 = bay_w / 2 + tube_wall;    // tube outside, local
+tz0 = bay_z0 - tube_wall;      tz1 = bay_z1 + tube_wall;
+tube_len = EL - cap_wall;                                      // the front cap closes the rest
 focus_screw_y = 0;
 focus_screw_dx = sled_len / 2;
 
@@ -211,15 +213,18 @@ module eyepiece() {
     usb_x0 = xiao_back - 4;
     difference() {
         union() {
-            translate([0, ty0, tz0]) cube([EL, ty1 - ty0, tz1 - tz0]);
+            translate([0, ty0, tz0]) cube([tube_len, ty1 - ty0, tz1 - tz0]);
             // hinge tab on top, temple side
             translate([0, ty0, tz1 - 0.01]) cube([10, 3, ep_tab_h + 5]);
             // boss under the focus screw slot
             translate([sled_x_min + focus_screw_dx - 3, focus_screw_y - 4, tz0 - 1.5])
                 cube([focus_travel + 6, 8, 1.51]);
         }
-        // bay, open at the front
-        translate([eye_wall + lens_pocket, -bay_w / 2, bay_z0]) cube([EL, bay_w, bay_z1 - bay_z0]);
+        // bay, open at the front; the end wall is thin except for a ring around the lens
+        difference() {
+            translate([tube_wall, -bay_w / 2, bay_z0]) cube([EL, bay_w, bay_z1 - bay_z0]);
+            translate([-1, 0, 0]) rotate([0, 90, 0]) cylinder(d = lens_d + 4, h = eye_wall + lens_pocket + 1);
+        }
         // lens pocket (lens drops in from inside) and 45-degree aperture
         translate([eye_wall, 0, 0]) rotate([0, 90, 0]) cylinder(d = lens_d + 0.4, h = lens_pocket + 0.01);
         translate([-0.01, 0, 0]) rotate([0, 90, 0])
@@ -228,15 +233,15 @@ module eyepiece() {
         translate([5, ty0 - 1, tz1 + ep_tab_h]) rotate([-90, 0, 0]) cylinder(d = bolt_d, h = 5);
         // focus slot: an M2 screw through here threads into the sled
         hull() for (x = [sled_x_min, sled_x_max])
-            translate([x + focus_screw_dx, focus_screw_y, tz0 - 2]) cylinder(d = bolt_d, h = wall + 3);
+            translate([x + focus_screw_dx, focus_screw_y, tz0 - 2]) cylinder(d = bolt_d, h = tube_wall + 3);
         // USB-C access from the top, over the XIAO's connector
-        translate([usb_x0, -6.5, bay_z1 - 1]) cube([12, 13, wall + 2]);
+        translate([usb_x0, -6.5, bay_z1 - 1]) cube([12, 13, tube_wall + 2]);
         // battery wire entry, temple side
-        translate([elec_x0 + 3, ty0 - 1, -6]) rotate([-90, 0, 0]) cylinder(d = 4, h = wall + 2);
+        translate([elec_x0 + 3, ty0 - 1, -6]) rotate([-90, 0, 0]) cylinder(d = 4, h = tube_wall + 2);
         // front-cap screws
         for (s = [-1, 1])
             translate([EL - cap_wall - cap_skirt / 2, s * (bay_w / 2 - 1), 0])
-                rotate([-90 * s, 0, 0]) cylinder(d = bolt_d, h = wall + 3);
+                rotate([-90 * s, 0, 0]) cylinder(d = bolt_d, h = tube_wall + 3);
     }
 }
 
