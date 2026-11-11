@@ -5,6 +5,8 @@ on:
     branches: [main]
     paths-ignore:
       - "desktop/**"
+      - "cad/**"
+      - ".github/workflows/render-cad.yml"
       - ".github/workflows/build-windows.yml"
   workflow_dispatch: {}
 

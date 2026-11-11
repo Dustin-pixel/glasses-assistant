@@ -6,3 +6,5 @@ local.properties
 *.iml
 .DS_Store
 __pycache__/
+cad/out/
+cad/dist/

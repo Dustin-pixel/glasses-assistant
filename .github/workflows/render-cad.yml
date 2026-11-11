@@ -1,0 +1,46 @@
+name: Render CAD
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "cad/**"
+      - ".github/workflows/render-cad.yml"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write   # to publish the STLs as a release
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install OpenSCAD
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq openscad xvfb > /dev/null
+
+      - name: Render parts, images and checks
+        run: xvfb-run -a bash cad/render.sh
+
+      - name: Upload everything
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cad-output
+          path: cad/out
+
+      - name: Zip printable parts
+        run: |
+          cd cad
+          mkdir -p dist
+          cp smart_glasses.scad out/print/*.stl out/report.txt dist/
+          cd dist && zip -q ../smart-glasses-cad-${{ github.run_number }}.zip *
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: cad-${{ github.run_number }}
+          name: CAD build ${{ github.run_number }}
+          body: Printable STLs for the smart-glasses clip-on, plus the OpenSCAD source and the check report.
+          files: cad/smart-glasses-cad-${{ github.run_number }}.zip
