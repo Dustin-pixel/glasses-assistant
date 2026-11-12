@@ -107,6 +107,15 @@ private fun VoicesCard(config: Config) {
                     }
                     Text(Skins.cast.joinToString(" · ") { "${it.character}: ${it.voiceName}" },
                         style = MaterialTheme.typography.bodySmall)
+                    val st by AssistantService.state.collectAsStateWithLifecycle()
+                    if (st.running) {
+                        if (st.voice.isNotEmpty()) Text(st.voice, style = MaterialTheme.typography.bodyMedium,
+                            color = if (st.voice.contains("didn't") || st.voice.contains("failed"))
+                                MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface)
+                        OutlinedButton(onClick = { AssistantService.testVoice(context) }) { Text("Test voice") }
+                    } else {
+                        Text("Start the assistant to load the voices and test them.", style = MaterialTheme.typography.bodySmall)
+                    }
                     TextButton(onClick = { VoicePack.remove(context) }) { Text("Remove voices (frees 380 MB)") }
                 }
                 is VoicePack.State.Failed -> {

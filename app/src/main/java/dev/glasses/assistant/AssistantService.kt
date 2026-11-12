@@ -49,6 +49,7 @@ data class AssistantState(
     val reply: String = "",
     val error: String? = null,
     val debate: List<DebateLine> = emptyList(),
+    val voice: String = "",                // which voice is speaking, and why
 )
 
 /** One spoken line in Argue mode. skinId is "user" for the person wearing the glasses. */
@@ -74,7 +75,10 @@ class AssistantService : Service() {
         startInForeground()
 
         speechIn = SpeechInput(this)
-        speechOut = SpeechOutput(this) { neuralVoice() }
+        speechOut = SpeechOutput(this, neural = { neuralVoice() }) { ok, problem ->
+            if (!ok) setVoice("Character voice failed while speaking, so the phone voice was used: $problem")
+            else if (_state.value.voice.startsWith("Character voice failed")) setVoice("Character voices ready")
+        }
         loadNeuralVoice()
         link = GlassesLink(Config.LINK_PORT, config.linkToken, ::onLinkEvent)
 
@@ -105,6 +109,19 @@ class AssistantService : Service() {
             ACTION_CLEAR -> { turn?.cancel(); _state.update { it.copy(debate = emptyList()) } }
             ACTION_STOP -> stopSelf()
             ACTION_VOICES -> loadNeuralVoice()
+            ACTION_TEST_VOICE -> {
+                turn?.cancel()
+                turn = scope.launch {
+                    val skin = config.skin
+                    setPhase(Phase.Speaking)
+                    try {
+                        neuralLoad?.join()
+                        say(if (skin.id == "default") "Voice check. This is how I sound." else "Voice check. This is ${skin.character}.")
+                    } finally {
+                        setPhase(Phase.Idle)
+                    }
+                }
+            }
             ACTION_SKIN -> {
                 link.send(Protocol.skin(config.skinId))
                 link.send(Protocol.overlay(config.skin.ready, ttlMs = 2000))
@@ -243,6 +260,7 @@ class AssistantService : Service() {
             setPhase(Phase.Speaking)
             link.send(Protocol.skin(speaker.id))
             link.send(Protocol.overlay("${speaker.character}: $text", ttlMs = 6000L + text.length * 50L))
+            neuralLoad?.takeIf { it.isActive && config.neuralVoices }?.let { kotlinx.coroutines.withTimeoutOrNull(30_000) { it.join() } }
             speechOut.speak(text, speaker)
         }
     }
@@ -274,14 +292,35 @@ class AssistantService : Service() {
     private var neuralLoad: Job? = null
 
     /** The neural voice when it's installed, turned on and loaded; otherwise null (phone voice). */
-    private fun neuralVoice(): NeuralVoice? = neural.takeIf { config.neuralVoices }
+    private fun neuralVoice(): NeuralVoice? {
+        if (!config.neuralVoices) { setVoice("Phone voice (character voices are switched off)"); return null }
+        if (neural == null && neuralLoad?.isActive != true) loadNeuralVoice()
+        return neural
+    }
+
+    private fun setVoice(text: String) = _state.update { it.copy(voice = text) }
 
     private fun loadNeuralVoice() {
-        if (neural != null || neuralLoad?.isActive == true || !VoicePack.isReady(this)) return
-        neuralLoad = scope.launch(Dispatchers.IO) { neural = NeuralVoice.load(this@AssistantService) }
+        if (neural != null || neuralLoad?.isActive == true) return
+        if (!VoicePack.isReady(this)) { setVoice("Phone voice (character voices not downloaded)"); return }
+        setVoice("Loading character voices…")
+        neuralLoad = scope.launch(Dispatchers.IO) {
+            val started = System.currentTimeMillis()
+            NeuralVoice.load(this@AssistantService)
+                .onSuccess {
+                    neural = it
+                    setVoice("Character voices ready (loaded in ${(System.currentTimeMillis() - started) / 1000} s)")
+                }
+                .onFailure {
+                    setVoice("Character voices didn't load, so the phone voice is used: " +
+                        (it.message ?: it.javaClass.simpleName).take(160))
+                }
+        }
     }
 
     private suspend fun say(text: String) {
+        // The model takes a few seconds to load; wait for it rather than falling back to the phone voice.
+        neuralLoad?.takeIf { it.isActive && config.neuralVoices }?.let { kotlinx.coroutines.withTimeoutOrNull(30_000) { it.join() } }
         val skin = config.skin
         speechOut.speak(text, skin)
     }
@@ -340,6 +379,7 @@ class AssistantService : Service() {
         const val ACTION_STOP = "dev.glasses.assistant.STOP"
         const val ACTION_SKIN = "dev.glasses.assistant.SKIN"
         const val ACTION_VOICES = "dev.glasses.assistant.VOICES"
+        const val ACTION_TEST_VOICE = "dev.glasses.assistant.TEST_VOICE"
         const val ACTION_CONTINUE = "dev.glasses.assistant.CONTINUE"
         const val ACTION_CLEAR = "dev.glasses.assistant.CLEAR"
         const val ACTION_ASK = "dev.glasses.assistant.ASK"
@@ -383,6 +423,9 @@ class AssistantService : Service() {
                 context.startService(Intent(context, AssistantService::class.java).setAction(ACTION_VOICES))
             }
         }
+
+        fun testVoice(context: Context) =
+            context.startService(Intent(context, AssistantService::class.java).setAction(ACTION_TEST_VOICE))
 
         fun stop(context: Context) =
             context.startService(Intent(context, AssistantService::class.java).setAction(ACTION_STOP))

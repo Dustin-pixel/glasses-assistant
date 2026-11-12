@@ -27,8 +27,9 @@ class NeuralVoice private constructor(private val tts: OfflineTts) {
     companion object {
         private const val TAG = "NeuralVoice"
 
-        fun load(context: Context): NeuralVoice? {
-            if (!VoicePack.isReady(context)) return null
+        /** Loads the model; the failure carries a readable reason. */
+        fun load(context: Context): Result<NeuralVoice> {
+            if (!VoicePack.isReady(context)) return Result.failure(IllegalStateException("voice pack not installed"))
             val d = VoicePack.dir(context)
             fun p(name: String) = File(d, name).absolutePath
             return try {
@@ -46,10 +47,17 @@ class NeuralVoice private constructor(private val tts: OfflineTts) {
                 val config = OfflineTtsConfig(
                     model = OfflineTtsModelConfig(kokoro = kokoro, numThreads = threads),
                 )
-                NeuralVoice(OfflineTts(assetManager = null, config = config))
+                val tts = OfflineTts(assetManager = null, config = config)
+                val speakers = tts.numSpeakers()
+                if (speakers < 30) {
+                    tts.release()
+                    Result.failure(IllegalStateException("the model reports $speakers voices; expected 53"))
+                } else {
+                    Result.success(NeuralVoice(tts))
+                }
             } catch (t: Throwable) {
                 Log.e(TAG, "Couldn't load the neural voice", t)
-                null
+                Result.failure(t)
             }
         }
     }

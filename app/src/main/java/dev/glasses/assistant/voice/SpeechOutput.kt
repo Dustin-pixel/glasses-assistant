@@ -36,6 +36,7 @@ import java.util.concurrent.ConcurrentHashMap
 class SpeechOutput(
     private val context: Context,
     private val neural: () -> NeuralVoice?,
+    private val report: (ok: Boolean, problem: String?) -> Unit = { _, _ -> },
 ) : TextToSpeech.OnInitListener {
     private val tts = TextToSpeech(context, this)
     private val audio = context.getSystemService(AudioManager::class.java)
@@ -71,11 +72,14 @@ class SpeechOutput(
         val voice = neural()
         if (voice != null) {
             try {
-                return speakNeural(voice, text, skin)
+                speakNeural(voice, text, skin)
+                report(true, null)
+                return
             } catch (e: CancellationException) {
                 throw e
-            } catch (e: Exception) {
-                Log.w(TAG, "Neural voice failed, using the phone's voice", e)
+            } catch (t: Throwable) {
+                Log.w(TAG, "Neural voice failed, using the phone's voice", t)
+                report(false, (t.message ?: t.javaClass.simpleName).take(160))
             }
         }
         speakSystem(text, skin)
