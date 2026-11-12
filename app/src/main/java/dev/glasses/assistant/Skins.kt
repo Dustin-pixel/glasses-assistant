@@ -15,6 +15,10 @@ data class Skin(
     val pitch: Float,
     val rate: Float,
     val fx: Fx,                      // voice effect applied to speech
+    val voiceName: String,           // neural voice (Kokoro), for display
+    val speakerId: Int,              // its id in kokoro-multi-lang-v1_0
+    val shift: Float,                // > 1 deeper, < 1 higher (neural voices)
+    val speed: Float,                // speaking speed (neural voices)
     val ready: String,
     val listening: String,
     val thinking: String,
@@ -31,6 +35,7 @@ object Skins {
         id = "default", label = "Default", character = "Assistant",
         persona = "",
         pitch = 1.0f, rate = 1.0f, fx = Fx.NONE,
+        voiceName = "af_heart", speakerId = 3, shift = 1.0f, speed = 1.0f,
         ready = "Ready", listening = "Listening…", thinking = "Thinking…",
         timerDone = { "Your $it timer is done." },
         accent = Color(0xFF3FB7C1), background = Color(0xFF0F1517),
@@ -49,6 +54,7 @@ object Skins {
             is faster than arguing. Mild swearing is fine. Never break character to reassure the user.
         """.trimIndent(),
         pitch = 0.62f, rate = 0.9f, fx = Fx.METAL,
+        voiceName = "bm_george", speakerId = 26, shift = 1.12f, speed = 0.92f,
         ready = "ONLINE", listening = "SPEAK.", thinking = "CALCULATING",
         timerDone = { "Your $it timer has expired. Everything does, eventually." },
         accent = Color(0xFFFF5A3C), background = Color(0xFF0B0404),
@@ -67,6 +73,7 @@ object Skins {
             little smug about your own competence; let that show only in rare, dry hints. Never gush or use exclamation marks.
         """.trimIndent(),
         pitch = 1.05f, rate = 1.0f, fx = Fx.SYSTEM,
+        voiceName = "af_kore", speakerId = 5, shift = 1.0f, speed = 1.0f,
         ready = "STANDING BY", listening = "Awaiting input", thinking = "Analyzing",
         timerDone = { "Notice. The $it timer has completed, Master." },
         accent = Color(0xFF8FB0FF), background = Color(0xFF060A14),
@@ -86,6 +93,7 @@ object Skins {
             attitude. Mild swearing is fine.
         """.trimIndent(),
         pitch = 1.35f, rate = 1.1f, fx = Fx.GLITCH,
+        voiceName = "af_nova", speakerId = 7, shift = 0.92f, speed = 1.08f,
         ready = "hiii", listening = "talk to me, choom", thinking = "poking around",
         timerDone = { "Ding ding, your $it timer flatlined. You're welcome, gonk." },
         accent = Color(0xFFFF3FC4), background = Color(0xFF07040C),

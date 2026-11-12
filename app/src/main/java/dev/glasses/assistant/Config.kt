@@ -21,6 +21,11 @@ class Config(context: Context) {
 
     val skin: Skin get() = Skins.byId(skinId)
 
+    /** Use the downloaded neural character voices instead of the phone's own voice. */
+    var neuralVoices: Boolean
+        get() = prefs.getBoolean(KEY_NEURAL, true)
+        set(value) = prefs.edit().putBoolean(KEY_NEURAL, value).apply()
+
     /** Argue mode: the characters talk to each other instead of answering you. */
     var argueMode: Boolean
         get() = prefs.getBoolean(KEY_ARGUE, false)
@@ -40,5 +45,6 @@ class Config(context: Context) {
         private const val KEY_TOKEN = "link_token"
         private const val KEY_SKIN = "skin"
         private const val KEY_ARGUE = "argue"
+        private const val KEY_NEURAL = "neural_voices"
     }
 }

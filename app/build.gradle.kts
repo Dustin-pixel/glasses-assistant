@@ -16,6 +16,8 @@ android {
         val build = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 1
         versionCode = build
         versionName = "0.1.$build"
+        // The voice engine ships native code; 64-bit ARM covers nearly every current phone.
+        ndk { abiFilters += listOf("arm64-v8a") }
     }
 
     // A fixed debug key checked into the repo: every build is signed the same way,
@@ -30,6 +32,11 @@ android {
     }
 
     buildFeatures { compose = true }
+
+    packaging {
+        // The Apache Commons jars each carry their own licence files.
+        resources { excludes += setOf("META-INF/DEPENDENCIES", "META-INF/LICENSE*", "META-INF/NOTICE*") }
+    }
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -46,6 +53,8 @@ dependencies {
     implementation("androidx.core:core-ktx:1.15.0")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
     implementation("androidx.media:media:1.7.0")                  // Android Auto (media app)
+    implementation(files("libs/sherpa-onnx-1.12.10.aar"))         // neural voices (downloaded by CI)
+    implementation("org.apache.commons:commons-compress:1.27.1")  // unpacks the voice pack
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")          // Claude API calls
     implementation("org.java-websocket:Java-WebSocket:1.5.7")     // glasses link server

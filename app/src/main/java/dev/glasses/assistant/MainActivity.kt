@@ -18,6 +18,9 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.Switch
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -26,10 +29,12 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.platform.LocalContext
@@ -37,6 +42,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import dev.glasses.assistant.voice.VoicePack
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -60,6 +66,52 @@ class MainActivity : ComponentActivity() {
                         config.skinId = id
                         AssistantService.skinChanged(this@MainActivity)
                     }
+                }
+            }
+        }
+    }
+}
+
+/** Download and switch the neural character voices. */
+@Composable
+private fun VoicesCard(config: Config) {
+    val context = LocalContext.current
+    val pack by VoicePack.state.collectAsStateWithLifecycle()
+    var enabled by remember { mutableStateOf(config.neuralVoices) }
+    LaunchedEffect(Unit) { VoicePack.refresh(context) }
+    LaunchedEffect(pack) { if (pack is VoicePack.State.Ready) AssistantService.voicesChanged(context) }
+
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Character voices", style = MaterialTheme.typography.titleMedium)
+            when (val s = pack) {
+                VoicePack.State.NotInstalled -> {
+                    Text("A natural-sounding voice for each character. It's a one-time download of about " +
+                        "350 MB, best on Wi-Fi. Until then the phone's own voice is used, with the same effects.",
+                        style = MaterialTheme.typography.bodyMedium)
+                    Button(onClick = { VoicePack.install(context) }) { Text("Download voices") }
+                }
+                is VoicePack.State.Downloading -> {
+                    Text("Downloading… ${s.mb} MB of about 350")
+                    LinearProgressIndicator(progress = { s.fraction }, modifier = Modifier.fillMaxWidth())
+                    Text("Keep the app open until it finishes.", style = MaterialTheme.typography.bodySmall)
+                }
+                is VoicePack.State.Unpacking -> {
+                    Text("Unpacking…")
+                    LinearProgressIndicator(progress = { s.fraction }, modifier = Modifier.fillMaxWidth())
+                }
+                VoicePack.State.Ready -> {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Switch(checked = enabled, onCheckedChange = { enabled = it; config.neuralVoices = it })
+                        Text("Use character voices", Modifier.padding(start = 12.dp))
+                    }
+                    Text(Skins.cast.joinToString(" · ") { "${it.character}: ${it.voiceName}" },
+                        style = MaterialTheme.typography.bodySmall)
+                    TextButton(onClick = { VoicePack.remove(context) }) { Text("Remove voices (frees 380 MB)") }
+                }
+                is VoicePack.State.Failed -> {
+                    Text("Download didn't finish: ${s.message}", color = MaterialTheme.colorScheme.error)
+                    Button(onClick = { VoicePack.install(context) }) { Text("Try again") }
                 }
             }
         }
@@ -137,6 +189,8 @@ private fun HomeScreen(skinId: String, onSkin: (String) -> Unit) {
             value = model, onValueChange = { model = it },
             label = { Text("Model") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
         )
+
+        VoicesCard(config)
 
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             if (state.running) {

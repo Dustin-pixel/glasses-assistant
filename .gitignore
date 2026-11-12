@@ -8,3 +8,4 @@ local.properties
 __pycache__/
 cad/out/
 cad/dist/
+app/libs/

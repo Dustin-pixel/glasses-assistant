@@ -100,6 +100,23 @@ object VoiceFx {
         return out.toArray()
     }
 
+    /**
+     * Resamples to size * factor (linear). Played at the original rate, factor > 1 is longer and lower;
+     * paired with generating speech faster by the same factor, it shifts pitch while keeping the timing.
+     */
+    fun stretch(x: FloatArray, factor: Float): FloatArray {
+        if (kotlin.math.abs(factor - 1f) < 1e-3f || x.isEmpty()) return x
+        val n = (x.size * factor).toInt()
+        return FloatArray(n) { i ->
+            val p = i / factor
+            val j = p.toInt()
+            val f = p - j
+            val a = if (j < x.size) x[j] else 0f
+            val b = if (j + 1 < x.size) x[j + 1] else 0f
+            a + (b - a) * f
+        }
+    }
+
     private fun crush(v: Float, bits: Int): Float {
         val steps = (1 shl (bits - 1)).toFloat()
         return Math.round(v * steps) / steps

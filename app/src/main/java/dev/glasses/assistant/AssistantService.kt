@@ -23,8 +23,10 @@ import dev.glasses.assistant.brain.ToolRegistry
 import dev.glasses.assistant.link.GlassesLink
 import dev.glasses.assistant.link.LinkEvent
 import dev.glasses.assistant.link.Protocol
+import dev.glasses.assistant.voice.NeuralVoice
 import dev.glasses.assistant.voice.SpeechInput
 import dev.glasses.assistant.voice.SpeechOutput
+import dev.glasses.assistant.voice.VoicePack
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -72,7 +74,8 @@ class AssistantService : Service() {
         startInForeground()
 
         speechIn = SpeechInput(this)
-        speechOut = SpeechOutput(this)
+        speechOut = SpeechOutput(this) { neuralVoice() }
+        loadNeuralVoice()
         link = GlassesLink(Config.LINK_PORT, config.linkToken, ::onLinkEvent)
 
         val tools = ToolRegistry(
@@ -101,6 +104,7 @@ class AssistantService : Service() {
             ACTION_HUSH -> turn?.cancel()
             ACTION_CLEAR -> { turn?.cancel(); _state.update { it.copy(debate = emptyList()) } }
             ACTION_STOP -> stopSelf()
+            ACTION_VOICES -> loadNeuralVoice()
             ACTION_SKIN -> {
                 link.send(Protocol.skin(config.skinId))
                 link.send(Protocol.overlay(config.skin.ready, ttlMs = 2000))
@@ -239,7 +243,7 @@ class AssistantService : Service() {
             setPhase(Phase.Speaking)
             link.send(Protocol.skin(speaker.id))
             link.send(Protocol.overlay("${speaker.character}: $text", ttlMs = 6000L + text.length * 50L))
-            speechOut.speak(text, speaker.pitch, speaker.rate, speaker.fx)
+            speechOut.speak(text, speaker)
         }
     }
 
@@ -264,9 +268,22 @@ class AssistantService : Service() {
         say("Something went wrong. Check the app for details.")
     }
 
+    // ---------------------------------------------------------------- neural voices
+
+    @Volatile private var neural: NeuralVoice? = null
+    private var neuralLoad: Job? = null
+
+    /** The neural voice when it's installed, turned on and loaded; otherwise null (phone voice). */
+    private fun neuralVoice(): NeuralVoice? = neural.takeIf { config.neuralVoices }
+
+    private fun loadNeuralVoice() {
+        if (neural != null || neuralLoad?.isActive == true || !VoicePack.isReady(this)) return
+        neuralLoad = scope.launch(Dispatchers.IO) { neural = NeuralVoice.load(this@AssistantService) }
+    }
+
     private suspend fun say(text: String) {
         val skin = config.skin
-        speechOut.speak(text, skin.pitch, skin.rate, skin.fx)
+        speechOut.speak(text, skin)
     }
 
     private fun setPhase(phase: Phase) = _state.update { it.copy(phase = phase) }
@@ -304,6 +321,8 @@ class AssistantService : Service() {
 
     override fun onDestroy() {
         scope.cancel()
+        neural?.release()
+        neural = null
         Thread { link.stop() }.start()
         speechOut.shutdown()
         Handler(Looper.getMainLooper()).post { speechIn.release() }
@@ -320,6 +339,7 @@ class AssistantService : Service() {
         const val ACTION_TALK = "dev.glasses.assistant.TALK"
         const val ACTION_STOP = "dev.glasses.assistant.STOP"
         const val ACTION_SKIN = "dev.glasses.assistant.SKIN"
+        const val ACTION_VOICES = "dev.glasses.assistant.VOICES"
         const val ACTION_CONTINUE = "dev.glasses.assistant.CONTINUE"
         const val ACTION_CLEAR = "dev.glasses.assistant.CLEAR"
         const val ACTION_ASK = "dev.glasses.assistant.ASK"
@@ -356,6 +376,13 @@ class AssistantService : Service() {
 
         fun newArgument(context: Context) =
             context.startService(Intent(context, AssistantService::class.java).setAction(ACTION_CLEAR))
+
+        /** Tell a running service the voice pack was installed, so it loads the neural voice. */
+        fun voicesChanged(context: Context) {
+            if (state.value.running) {
+                context.startService(Intent(context, AssistantService::class.java).setAction(ACTION_VOICES))
+            }
+        }
 
         fun stop(context: Context) =
             context.startService(Intent(context, AssistantService::class.java).setAction(ACTION_STOP))

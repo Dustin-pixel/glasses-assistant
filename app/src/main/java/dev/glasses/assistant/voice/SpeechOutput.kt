@@ -10,9 +10,13 @@ import android.os.Bundle
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import android.util.Log
+import dev.glasses.assistant.Skin
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
@@ -23,12 +27,16 @@ import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
 /**
- * Text-to-speech with per-skin voice effects.
- * With an effect, speech is rendered to a WAV, processed by [VoiceFx], and played through an
- * AudioTrack tagged as assistant speech (so it ducks music and routes to the car on Android Auto).
- * Without one, or if the engine's output can't be read, it falls back to speaking directly.
+ * Speaks in a character's voice.
+ * Neural path (when the voice pack is installed and turned on): Kokoro generates each sentence,
+ * the pitch shift and effect are applied, and the next sentence is generated while this one plays.
+ * Fallback: the phone's own text-to-speech, rendered to a file so the same effects apply.
+ * Audio is tagged as assistant speech so it ducks music and routes to the car on Android Auto.
  */
-class SpeechOutput(private val context: Context) : TextToSpeech.OnInitListener {
+class SpeechOutput(
+    private val context: Context,
+    private val neural: () -> NeuralVoice?,
+) : TextToSpeech.OnInitListener {
     private val tts = TextToSpeech(context, this)
     private val audio = context.getSystemService(AudioManager::class.java)
     private val pending = ConcurrentHashMap<String, CompletableDeferred<Boolean>>()
@@ -57,20 +65,65 @@ class SpeechOutput(private val context: Context) : TextToSpeech.OnInitListener {
         id?.let { pending.remove(it)?.complete(ok) }
     }
 
-    /** Speaks and suspends until finished (or cancelled). */
-    suspend fun speak(text: String, pitch: Float = 1f, rate: Float = 1f, fx: Fx = Fx.NONE) {
-        if (!ready || text.isBlank()) return
-        tts.setPitch(pitch)
-        tts.setSpeechRate(rate)
-        if (fx == Fx.NONE) return speakDirect(text)
+    /** Speaks [text] as [skin] and suspends until finished (or cancelled). */
+    suspend fun speak(text: String, skin: Skin) {
+        if (text.isBlank()) return
+        val voice = neural()
+        if (voice != null) {
+            try {
+                return speakNeural(voice, text, skin)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w(TAG, "Neural voice failed, using the phone's voice", e)
+            }
+        }
+        speakSystem(text, skin)
+    }
 
+    // ------------------------------------------------------------------ neural
+
+    private suspend fun speakNeural(voice: NeuralVoice, text: String, skin: Skin) = coroutineScope {
+        val parts = sentences(text)
+        // Generate faster by the pitch factor, then stretch back: same length, lower (or higher) voice.
+        val speed = skin.speed * skin.shift
+        fun render(s: String): Deferred<FloatArray> = async(Dispatchers.Default) {
+            val raw = voice.generate(s, skin.speakerId, speed)
+            VoiceFx.apply(skin.fx, VoiceFx.stretch(raw, skin.shift), voice.sampleRate)
+        }
+        var next = render(parts[0])
+        for (i in parts.indices) {
+            val current = next.await()
+            if (i + 1 < parts.size) next = render(parts[i + 1])   // overlap: next sentence renders while this one plays
+            play(current, voice.sampleRate)
+        }
+    }
+
+    /** Splits into sentences, merging short ones so the voice keeps its flow. */
+    private fun sentences(text: String): List<String> {
+        val raw = text.trim().split(Regex("(?<=[.!?…])\\s+")).filter { it.isNotBlank() }
+        val out = mutableListOf<String>()
+        for (s in raw) {
+            if (out.isNotEmpty() && out.last().length < 40) out[out.lastIndex] = out.last() + " " + s
+            else out += s
+        }
+        return out.ifEmpty { listOf(text) }
+    }
+
+    // ------------------------------------------------------------------ phone voice fallback
+
+    private suspend fun speakSystem(text: String, skin: Skin) {
+        if (!ready) return
+        tts.setPitch(skin.pitch)
+        tts.setSpeechRate(skin.rate)
+        if (skin.fx == Fx.NONE) return speakDirect(text)
         val pcm = runCatching { synthesize(text) }.getOrElse {
             if (it is CancellationException) throw it
             Log.w(TAG, "Synthesis failed, speaking directly", it)
             null
         }
         if (pcm == null || pcm.samples.isEmpty()) return speakDirect(text)
-        val processed = withContext(Dispatchers.Default) { VoiceFx.apply(fx, pcm.samples, pcm.rate) }
+        val processed = withContext(Dispatchers.Default) { VoiceFx.apply(skin.fx, pcm.samples, pcm.rate) }
         play(processed, pcm.rate)
     }
 
@@ -103,6 +156,8 @@ class SpeechOutput(private val context: Context) : TextToSpeech.OnInitListener {
             file.delete()
         }
     }
+
+    // ------------------------------------------------------------------ playback
 
     private suspend fun play(samples: FloatArray, rate: Int) = withContext(Dispatchers.IO) {
         if (samples.isEmpty()) return@withContext
