@@ -54,7 +54,6 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
     implementation("androidx.media:media:1.7.0")                  // Android Auto (media app)
     implementation(files("libs/sherpa-onnx-1.12.10.aar"))         // neural voices (downloaded by CI)
-    implementation("org.apache.commons:commons-compress:1.27.1")  // unpacks the voice pack
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")          // Claude API calls
     implementation("org.java-websocket:Java-WebSocket:1.5.7")     // glasses link server

@@ -87,17 +87,17 @@ private fun VoicesCard(config: Config) {
             when (val s = pack) {
                 VoicePack.State.NotInstalled -> {
                     Text("A natural-sounding voice for each character. It's a one-time download of about " +
-                        "350 MB, best on Wi-Fi. Until then the phone's own voice is used, with the same effects.",
+                        "370 MB, best on Wi-Fi. Until then the phone's own voice is used, with the same effects.",
                         style = MaterialTheme.typography.bodyMedium)
                     Button(onClick = { VoicePack.install(context) }) { Text("Download voices") }
                 }
                 is VoicePack.State.Downloading -> {
-                    Text("Downloading… ${s.mb} MB of about 350")
+                    Text("Downloading… ${s.mb} of ${s.totalMb} MB")
                     LinearProgressIndicator(progress = { s.fraction }, modifier = Modifier.fillMaxWidth())
                     Text("Keep the app open until it finishes.", style = MaterialTheme.typography.bodySmall)
                 }
                 is VoicePack.State.Unpacking -> {
-                    Text("Unpacking…")
+                    Text("Unpacking… ${(s.fraction * 100).toInt()}%")
                     LinearProgressIndicator(progress = { s.fraction }, modifier = Modifier.fillMaxWidth())
                 }
                 VoicePack.State.Ready -> {
