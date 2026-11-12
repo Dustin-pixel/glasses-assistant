@@ -1,0 +1,39 @@
+name: Publish voice pack
+
+# Repackages the Kokoro voices (Apache 2.0) from sherpa-onnx's release into a zip
+# the phone can unpack quickly, and publishes it as the "voicepack-1" release.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "tools/repack_voicepack.py"
+      - ".github/workflows/voicepack.yml"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  pack:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download and unpack the original voices
+        run: |
+          curl -fsSL -o kokoro.tar.bz2 \
+            https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/kokoro-multi-lang-v1_0.tar.bz2
+          tar xjf kokoro.tar.bz2
+
+      - name: Repack as zip
+        run: python3 tools/repack_voicepack.py kokoro-multi-lang-v1_0 kokoro-voicepack-1.zip
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: voicepack-1
+          name: Character voice pack 1
+          body: >
+            Kokoro-82M multi-lang v1.0 voices (Apache 2.0, by hexgrad), as packaged for sherpa-onnx by k2-fsa,
+            repacked as a zip so phones can unpack it quickly. The app downloads this by itself.
+          files: kokoro-voicepack-1.zip
