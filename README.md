@@ -32,7 +32,7 @@ with a single `.bin`. To install it, from a computer with Chrome or Edge:
 
 On first start the display says *Join Wi-Fi Glasses-Setup*. Join that network from your phone, open
 http://192.168.4.1 and enter your hotspot name, its password and the link token from the app. To change these
-later, hold the button while the glasses power up.
+later, restart the glasses and hold the button for a second while the screen says *Hold the button now*.
 
 Button (the XIAO's BOOT button, or one wired from D1 to GND): press to talk, double-press to switch the
 display (normal, now playing, phone screen), and hold to stop talking and clear the display.

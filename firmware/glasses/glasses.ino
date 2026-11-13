@@ -7,7 +7,7 @@
     - answers "capture" with a photo from the camera
     - sends button presses: short = talk, double = switch display, long = hush and clear
 
-  First run (or hold the button while it powers up): it makes a Wi-Fi network called "Glasses-Setup".
+  First run (or hold the button for a second while it says "Hold the button now"): it makes a Wi-Fi network called "Glasses-Setup".
   Join it from your phone, open http://192.168.4.1 and enter your hotspot name, password and the
   link token shown in the app.
 
@@ -374,9 +374,16 @@ void setup() {
   token = prefs.getString("token", "");
   phoneIp = prefs.getString("phone", "");
 
-  setStatus("Starting");
-  delay(300);
-  if (ssid.isEmpty() || buttonDown()) portal();
+  // Holding BOOT during power-up would start the chip's flashing mode, so setup is asked for
+  // by holding the button for a second while this message shows.
+  setStatus(ssid.isEmpty() ? "Starting" : "Hold the button now to change Wi-Fi");
+  uint32_t held = 0, start = millis();
+  while (!ssid.isEmpty() && millis() - start < 2500) {
+    held = buttonDown() ? held + 20 : 0;
+    if (held >= 1000) break;
+    delay(20);
+  }
+  if (ssid.isEmpty() || held >= 1000) portal();
 
   startCamera();
 
@@ -388,7 +395,7 @@ void setup() {
   while (WiFi.status() != WL_CONNECTED) {
     delay(250);
     if (millis() - t0 > 30000) {
-      setStatus("Can't join " + ssid + ". Hold the button and restart to change it.");
+      setStatus("Can't join " + ssid + ". Restart and hold the button to change it.");
       t0 = millis();
       WiFi.reconnect();
     }
