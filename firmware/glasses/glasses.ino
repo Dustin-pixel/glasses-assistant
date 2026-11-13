@@ -30,7 +30,16 @@
 #include <TJpg_Decoder.h>
 #include "esp_camera.h"
 
-#define FW_VERSION "1.0"
+#ifndef FW_BUILD
+#define FW_BUILD 0
+#endif
+#define STR2(x) #x
+#define STR(x) STR2(x)
+#define FW_VERSION "1." STR(FW_BUILD)
+
+// Survives a crash-restart (not a power cut): lets the glasses notice the camera crashing them.
+RTC_NOINIT_ATTR uint32_t cameraStarting;
+#define CAMERA_MAGIC 0xCA3E5A11
 #define LINK_PORT 8765
 #define SIZE 240
 
@@ -233,8 +242,7 @@ bool tryCamera(int xclkHz, framesize_t size) {
   if (e != ESP_OK) {
     cameraError = cameraHelp(e);
     Serial.printf("Camera start failed at %d MHz: %s\n", xclkHz / 1000000, cameraError.c_str());
-    esp_camera_deinit();
-    return false;
+    return false;   // esp_camera_init already cleaned up after itself
   }
   sensor_t *sensor = esp_camera_sensor_get();
   if (sensor) {
@@ -257,8 +265,17 @@ bool tryCamera(int xclkHz, framesize_t size) {
 void startCamera() {
   if (cameraOk) { esp_camera_deinit(); cameraOk = false; }
   cameraModel = "";
+  // If the last start crashed the glasses, don't try again at power-up; Retry camera still can.
+  if (cameraStarting == CAMERA_MAGIC && esp_reset_reason() != ESP_RST_POWERON && esp_reset_reason() != ESP_RST_SW) {
+    cameraStarting = 0;
+    cameraError = "The camera crashed the glasses while starting, so it was skipped. Reseat its ribbon, then tap Retry camera.";
+    Serial.println(cameraError);
+    return;
+  }
+  cameraStarting = CAMERA_MAGIC;
   // Normal settings first, then a slower clock that some modules and long ribbons need.
   cameraOk = tryCamera(20000000, FRAMESIZE_VGA) || tryCamera(10000000, FRAMESIZE_VGA);
+  cameraStarting = 0;
   Serial.println(cameraOk ? "Camera ready: " + cameraModel : "Camera failed: " + cameraError);
 }
 
