@@ -470,14 +470,21 @@ class AssistantService : Service() {
             return
         }
         // Android 14+: the service must be a screen-capture service before it gets the capture.
-        startInForeground(withCapture = true)
+        runCatching { startInForeground(withCapture = true) }.onFailure {
+            Log.e(TAG, "Couldn't become a screen-capture service", it)
+            _state.update { s -> s.copy(error = "Screen sharing: ${it.message}") }
+            link.send(Protocol.overlay("Couldn't start screen sharing", ttlMs = 3000))
+            return
+        }
         val mpm = getSystemService(MediaProjectionManager::class.java)
-        val projection = runCatching { mpm.getMediaProjection(resultCode, data) }.getOrNull() ?: return
+        val projection = runCatching { mpm.getMediaProjection(resultCode, data) }
+            .onFailure { _state.update { s -> s.copy(error = "Screen sharing: ${it.message}") } }
+            .getOrNull() ?: return
         val m = ScreenMirror(this, projection, screen, { ControlService.instance?.foreground }) {
             mirror = null
             _state.update { it.copy(mirrorAllowed = false) }
             if (screen.source.value == Source.Mirror) screen.setSource(Source.None)
-            startInForeground(withCapture = false)
+            runCatching { startInForeground(withCapture = false) }
         }
         runCatching { m.start() }.onFailure {
             Log.e(TAG, "Mirror failed to start", it)

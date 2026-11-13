@@ -21,18 +21,35 @@ the glasses (Pi Zero 2 W) are a thin client: camera, display, button.
 
 The app shows a link token. The glasses need it to connect.
 
-## Glasses client
+## Glasses firmware (XIAO ESP32S3 Sense)
 
-On the Pi (or a laptop for testing), with the phone's hotspot on and the device joined to it:
+`firmware/glasses/glasses.ino`. GitHub builds it on every change and publishes a **Glasses firmware** release
+with a single `.bin`. To install it, from a computer with Chrome or Edge:
 
-```
-pip install websockets
-python3 glasses/glasses_client.py --token <token from the app>
-```
+1. Plug the XIAO in with a USB-C data cable.
+2. Open https://espressif.github.io/esptool-js/, set the baud rate to 921600 and click **Connect**.
+3. Set the flash address to `0x0`, choose the `.bin` and click **Program**. Then unplug and replug the XIAO.
 
-It connects to the default gateway (the phone, when on its hotspot). Press Enter to start a turn.
-With a Pi camera attached, "what am I looking at?" sends a frame to Claude.
-To test over normal Wi-Fi instead, pass `--phone <phone IP>`.
+On first start the display says *Join Wi-Fi Glasses-Setup*. Join that network from your phone, open
+http://192.168.4.1 and enter your hotspot name, its password and the link token from the app. To change these
+later, hold the button while the glasses power up.
+
+Button (the XIAO's BOOT button, or one wired from D1 to GND): press to talk, double-press to switch the
+display (normal, now playing, phone screen), and hold to stop talking and clear the display.
+
+`glasses/glasses_client.py` is the older Raspberry Pi version, and is still handy for testing the link from a laptop.
+
+## Display, search and phone control
+
+- **Web search**: Claude's web search tool, switchable in the app. It costs about $10 per 1,000 searches on the API key.
+- **Now playing**: a round card with the art, title, artist and a progress ring. It works with any player.
+  Needs *music access* (Notification access).
+- **Screen mirror**: the phone screen at up to 12 frames a second. Crop is auto (TikTok fills the circle,
+  YouTube shows the video strip, other apps fit), or fit, fill, video or zoom. Android asks once per session.
+- **Text card**: longer text paged to fit the circle, e.g. a reply read from the Claude app.
+- **Phone control** (Accessibility): opens apps and searches, swipes to the next TikTok, scrolls, reads the
+  screen, taps buttons by label and types (e.g. a prompt into the Claude app). On sideloaded apps, Android
+  may first need *Allow restricted settings* from the app's info page.
 
 ## Protocol
 
@@ -40,14 +57,18 @@ One WebSocket; JSON text frames plus binary JPEG frames.
 
 | Direction | Message | Fields |
 |---|---|---|
-| glasses → phone | `hello` | `token`, `device` (must be first) |
-| glasses → phone | `button` | starts a turn |
-| glasses → phone | `status` | free-form (battery, temperature) |
+| glasses → phone | `hello` | `token`, `device`, `fw` (must be first) |
+| glasses → phone | `button` | `press`: `short` (talk), `double` (switch display), `long` (hush) |
+| glasses → phone | `status` | `rssi`, `psram_free`, `uptime_s`, `camera` |
 | glasses → phone | `capture_failed` | `id`, `reason` |
+| glasses → phone | `frame_ack` | sent after drawing a streamed frame (paces the stream) |
 | glasses → phone | *binary* | JPEG answering the latest `capture` |
 | phone → glasses | `capture` | `id` |
 | phone → glasses | `overlay` | `text`, `pos` (`top`/`bottom`), `ttl_ms` |
 | phone → glasses | `clear` | |
+| phone → glasses | `skin` | `name`, `accent`, `bg`, `text` (RGB565) |
+| phone → glasses | *binary* | 240×240 JPEG to fill the display |
+| phone → glasses | `stream_end` | back to the glasses' own screen |
 
 ## Code map
 
