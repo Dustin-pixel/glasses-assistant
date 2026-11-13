@@ -222,6 +222,53 @@ String cameraHelp(esp_err_t e) {
   return name;
 }
 
+/*
+  Low-level check, run when the camera driver can't find a camera: drive the camera's clock and
+  call out on its control lines (SCCB, like I2C) at every address a supported camera uses.
+  A camera that answers is connected and powered; silence means a connection or hardware fault.
+*/
+void sccbDelay() { delayMicroseconds(10); }
+void sdaLow() { pinMode(CAM_SIOD, OUTPUT); digitalWrite(CAM_SIOD, LOW); }
+void sdaRelease() { pinMode(CAM_SIOD, INPUT_PULLUP); }
+void sclLow() { pinMode(CAM_SIOC, OUTPUT); digitalWrite(CAM_SIOC, LOW); }
+void sclRelease() { pinMode(CAM_SIOC, INPUT_PULLUP); }
+
+bool sccbAck(uint8_t addr) {
+  // start
+  sdaRelease(); sclRelease(); sccbDelay();
+  sdaLow(); sccbDelay(); sclLow(); sccbDelay();
+  uint8_t b = addr << 1;   // write
+  for (int i = 7; i >= 0; i--) {
+    if (b & (1 << i)) sdaRelease(); else sdaLow();
+    sccbDelay(); sclRelease(); sccbDelay(); sclLow(); sccbDelay();
+  }
+  sdaRelease(); sccbDelay(); sclRelease(); sccbDelay();
+  bool ack = digitalRead(CAM_SIOD) == LOW;
+  sclLow(); sccbDelay();
+  // stop
+  sdaLow(); sccbDelay(); sclRelease(); sccbDelay(); sdaRelease(); sccbDelay();
+  return ack;
+}
+
+String probeCamera() {
+  sdaRelease(); sclRelease();
+  delay(2);
+  bool sdaHigh = digitalRead(CAM_SIOD) == HIGH, sclHigh = digitalRead(CAM_SIOC) == HIGH;
+  ledcAttach(CAM_XCLK, 10000000, 1);
+  ledcWrite(CAM_XCLK, 1);
+  delay(20);
+  String found;
+  const uint8_t addrs[] = {0x30, 0x3C, 0x21, 0x2A, 0x6E};   // OV2640, OV3660/OV5640, OV7670, GC, BF
+  for (uint8_t a : addrs) if (sccbAck(a)) found += String(found.length() ? ", 0x" : "0x") + String(a, HEX);
+  ledcDetach(CAM_XCLK);
+  pinMode(CAM_SIOD, INPUT); pinMode(CAM_SIOC, INPUT);
+  String r = "Line check: ";
+  if (!sdaHigh || !sclHigh) r += "a control line is stuck low (shorted or a bent pin). ";
+  r += found.length() ? "a camera answered at " + found + ", so it is connected; the driver didn't recognise it."
+                      : "nothing answered at any camera address, so the camera isn't connected or isn't powered.";
+  return r;
+}
+
 bool tryCamera(int xclkHz, framesize_t size) {
   camera_config_t c = {};
   c.ledc_channel = LEDC_CHANNEL_0;
@@ -275,6 +322,9 @@ void startCamera() {
   cameraStarting = CAMERA_MAGIC;
   // Normal settings first, then a slower clock that some modules and long ribbons need.
   cameraOk = tryCamera(20000000, FRAMESIZE_VGA) || tryCamera(10000000, FRAMESIZE_VGA);
+  if (!cameraOk && cameraError.startsWith("ESP_ERR_NOT_FOUND")) {
+    cameraError = "ESP_ERR_NOT_FOUND: no camera answered. " + probeCamera();
+  }
   cameraStarting = 0;
   Serial.println(cameraOk ? "Camera ready: " + cameraModel : "Camera failed: " + cameraError);
 }
