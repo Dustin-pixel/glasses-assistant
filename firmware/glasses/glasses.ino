@@ -65,6 +65,8 @@ Preferences prefs;
 
 String ssid, pass, token, phoneIp;
 bool cameraOk = false;
+String cameraModel;              // e.g. OV2640, OV3660
+String cameraError;              // why it didn't start, in words
 bool linked = false;
 bool streaming = false;          // showing streamed pictures instead of the plain screen
 
@@ -198,7 +200,20 @@ void sendText(const String &s) { ws.sendTXT(s.c_str()); }
 
 // ---------------------------------------------------------------- camera
 
-void startCamera() {
+/** Plain-words reason for a camera failure. */
+String cameraHelp(esp_err_t e) {
+  String name = esp_err_to_name(e);
+  if (e == ESP_ERR_NOT_FOUND || e == 0x105 || e == ESP_FAIL)
+    return name + ": no camera answered. Check the camera's ribbon is clicked fully into the Sense board, "
+                  "and the Sense board is pressed all the way onto the XIAO.";
+  if (e == ESP_ERR_NO_MEM)
+    return name + ": out of memory. PSRAM may be off in this build.";
+  if (e == ESP_ERR_NOT_SUPPORTED)
+    return name + ": this camera model isn't supported by the firmware.";
+  return name;
+}
+
+bool tryCamera(int xclkHz, framesize_t size) {
   camera_config_t c = {};
   c.ledc_channel = LEDC_CHANNEL_0;
   c.ledc_timer = LEDC_TIMER_0;
@@ -207,20 +222,52 @@ void startCamera() {
   c.pin_xclk = CAM_XCLK; c.pin_pclk = CAM_PCLK; c.pin_vsync = CAM_VSYNC; c.pin_href = CAM_HREF;
   c.pin_sccb_sda = CAM_SIOD; c.pin_sccb_scl = CAM_SIOC;
   c.pin_pwdn = -1; c.pin_reset = -1;
-  c.xclk_freq_hz = 20000000;
+  c.xclk_freq_hz = xclkHz;
   c.pixel_format = PIXFORMAT_JPEG;
-  c.frame_size = FRAMESIZE_VGA;      // 640x480: plenty for the assistant to read signs and labels
+  c.frame_size = size;
   c.jpeg_quality = 12;
-  c.fb_count = 1;
+  c.fb_count = 2;
   c.fb_location = CAMERA_FB_IN_PSRAM;
   c.grab_mode = CAMERA_GRAB_LATEST;
-  cameraOk = esp_camera_init(&c) == ESP_OK;
-  Serial.println(cameraOk ? "Camera ready" : "Camera failed");
+  esp_err_t e = esp_camera_init(&c);
+  if (e != ESP_OK) {
+    cameraError = cameraHelp(e);
+    Serial.printf("Camera start failed at %d MHz: %s\n", xclkHz / 1000000, cameraError.c_str());
+    esp_camera_deinit();
+    return false;
+  }
+  sensor_t *sensor = esp_camera_sensor_get();
+  if (sensor) {
+    camera_sensor_info_t *info = esp_camera_sensor_get_info(&sensor->id);
+    cameraModel = info ? info->name : String("PID 0x") + String(sensor->id.PID, HEX);
+  }
+  // Prove it with one real picture.
+  camera_fb_t *fb = esp_camera_fb_get();
+  if (!fb) {
+    cameraError = "The camera started but gave no picture. Reseat its ribbon.";
+    Serial.println(cameraError);
+    esp_camera_deinit();
+    return false;
+  }
+  esp_camera_fb_return(fb);
+  cameraError = "";
+  return true;
+}
+
+void startCamera() {
+  if (cameraOk) { esp_camera_deinit(); cameraOk = false; }
+  cameraModel = "";
+  // Normal settings first, then a slower clock that some modules and long ribbons need.
+  cameraOk = tryCamera(20000000, FRAMESIZE_VGA) || tryCamera(10000000, FRAMESIZE_VGA);
+  Serial.println(cameraOk ? "Camera ready: " + cameraModel : "Camera failed: " + cameraError);
 }
 
 void capture(int id) {
   if (!cameraOk) {
-    sendText(String("{\"type\":\"capture_failed\",\"id\":") + id + ",\"reason\":\"camera not found\"}");
+    JsonDocument d;
+    d["type"] = "capture_failed"; d["id"] = id; d["reason"] = "the glasses camera didn't start: " + cameraError;
+    String out; serializeJson(d, out);
+    sendText(out);
     return;
   }
   // The first frame can be stale; grab twice.
@@ -382,20 +429,24 @@ img{max-width:min(92vw,480px);border-radius:10px}</style>
 <div class=lens><canvas id=c width=240 height=240></canvas></div>
 <div class=row><button onclick="press('short')">Press · talk</button><button onclick="press('double')">Double · switch display</button>
 <button onclick="press('long')">Hold · hush</button></div>
-<div class=row><button onclick="photo()">Take a photo</button></div>
-<div id=st>Connecting…</div><img id=ph hidden>
+<div class=row><button onclick="photo()">Take a photo</button><button onclick="retry()">Retry camera</button></div>
+<div id=st>Connecting…</div><div id=cam></div><img id=ph hidden>
 <script>
 const c=document.getElementById('c').getContext('2d'),img=c.createImageData(240,240);let v=0;
 async function frame(){try{const r=await fetch('/screen?v='+v);if(r.status==200){v=+r.headers.get('X-Version');
 const b=new Uint8Array(await r.arrayBuffer()),d=img.data;for(let i=0,j=0;i<b.length;i+=2,j+=4){const p=b[i]|b[i+1]<<8;
 d[j]=(p>>11)<<3;d[j+1]=((p>>5)&63)<<2;d[j+2]=(p&31)<<3;d[j+3]=255}c.putImageData(img,0,0)}}catch(e){}setTimeout(frame,document.hidden?1000:200)}
 async function status(){try{const s=await (await fetch('/status')).json();document.getElementById('st').textContent=
-(s.linked?'Linked to the app at '+s.phone:'Not linked: looking for the app at '+s.phone)+'\nSkin: '+s.skin+' · Wi-Fi '+s.ssid+' ('+s.rssi+' dBm)'+
-'\nCamera: '+(s.camera?'working':'not found')+' · Streamed pictures: '+s.frames+' · Presses sent: '+s.presses+
+(s.camera_error?'Camera problem: '+s.camera_error+'\n\n':'')+(s.linked?'Linked to the app at '+s.phone:'Not linked: looking for the app at '+s.phone)+'\nSkin: '+s.skin+' · Wi-Fi '+s.ssid+' ('+s.rssi+' dBm)'+
+'\nCamera: '+(s.camera?(s.camera_model||'')+' working':'not working')+' · Streamed pictures: '+s.frames+' · Presses sent: '+s.presses+
 '\nFree PSRAM: '+Math.round(s.psram/1024)+' KB · Up '+s.uptime+' s'}catch(e){
 document.getElementById('st').textContent='Lost contact with the glasses'}setTimeout(status,2000)}
 function press(k){fetch('/press?kind='+k)}
-function photo(){const p=document.getElementById('ph');p.hidden=false;p.src='/photo?t='+Date.now()}
+const cam=document.getElementById('cam');cam.style.cssText='max-width:420px;text-align:center;color:#f28b82'
+async function photo(){const p=document.getElementById('ph');cam.textContent='Taking a photo…';try{const r=await fetch('/photo?t='+Date.now());
+if(!r.ok){cam.textContent='Photo failed: '+await r.text();p.hidden=true;return}p.src=URL.createObjectURL(await r.blob());p.hidden=false;cam.textContent=''}
+catch(e){cam.textContent='Photo failed: lost contact'}}
+async function retry(){cam.textContent='Restarting the camera…';try{cam.textContent=await (await fetch('/camera/retry')).text()}catch(e){cam.textContent='Lost contact'}}
 frame();status();
 </script>)HTML";
 
@@ -415,19 +466,24 @@ void startVirtualDisplay() {
     web.send(linked ? 200 : 409, "text/plain", linked ? "ok" : "not linked to the app");
   });
   web.on("/photo", []() {
-    if (!cameraOk) { web.send(503, "text/plain", "camera not found"); return; }
+    if (!cameraOk) { web.send(503, "text/plain", "the camera didn't start. " + cameraError); return; }
     camera_fb_t *fb = esp_camera_fb_get();
     if (fb) esp_camera_fb_return(fb);   // drop a stale frame
     fb = esp_camera_fb_get();
-    if (!fb) { web.send(503, "text/plain", "no frame"); return; }
+    if (!fb) { web.send(503, "text/plain", "the camera gave no picture. Try Retry camera, or reseat its ribbon."); return; }
     web.sendHeader("Cache-Control", "no-store");
     web.send_P(200, "image/jpeg", (const char *)fb->buf, fb->len);
     esp_camera_fb_return(fb);
   });
+  web.on("/camera/retry", []() {
+    startCamera();
+    web.send(200, "text/plain", cameraOk ? "Camera working: " + cameraModel : "Camera failed: " + cameraError);
+  });
   web.on("/status", []() {
     JsonDocument d;
     d["linked"] = linked; d["phone"] = linkHost; d["ssid"] = ssid; d["rssi"] = WiFi.RSSI();
-    d["camera"] = cameraOk; d["frames"] = framesIn; d["presses"] = presses; d["skin"] = skinName;
+    d["camera"] = cameraOk; d["camera_model"] = cameraModel; d["camera_error"] = cameraError;
+    d["frames"] = framesIn; d["presses"] = presses; d["skin"] = skinName;
     d["streaming"] = streaming; d["psram"] = ESP.getFreePsram(); d["uptime"] = millis() / 1000;
     d["display"] = false; d["fw"] = FW_VERSION;
     String out; serializeJson(d, out);
