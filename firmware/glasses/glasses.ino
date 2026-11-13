@@ -456,7 +456,7 @@ d[j]=(p>>11)<<3;d[j+1]=((p>>5)&63)<<2;d[j+2]=(p&31)<<3;d[j+3]=255}c.putImageData
 async function status(){try{const s=await (await fetch('/status')).json();document.getElementById('st').textContent=
 (s.camera_error?'Camera problem: '+s.camera_error+'\n\n':'')+(s.linked?'Linked to the app at '+s.phone:'Not linked: looking for the app at '+s.phone)+'\nSkin: '+s.skin+' · Wi-Fi '+s.ssid+' ('+s.rssi+' dBm)'+
 '\nCamera: '+(s.camera?(s.camera_model||'')+' working':'not working')+' · Streamed pictures: '+s.frames+' · Presses sent: '+s.presses+
-'\nFree PSRAM: '+Math.round(s.psram/1024)+' KB · Up '+s.uptime+' s'}catch(e){
+'\nFree PSRAM: '+Math.round(s.psram/1024)+' KB · Up '+s.uptime+' s · Firmware '+s.fw}catch(e){
 document.getElementById('st').textContent='Lost contact with the glasses'}setTimeout(status,2000)}
 function press(k){fetch('/press?kind='+k)}
 const cam=document.getElementById('cam');cam.style.cssText='max-width:420px;text-align:center;color:#f28b82'
@@ -513,6 +513,7 @@ void startVirtualDisplay() {
 
 void setup() {
   Serial.begin(115200);
+  Serial.printf("Glasses firmware %s, restart reason %d\n", FW_VERSION, (int)esp_reset_reason());
   pinMode(BUTTON_BOOT, INPUT_PULLUP);
   pinMode(BUTTON_EXT, INPUT_PULLUP);
 

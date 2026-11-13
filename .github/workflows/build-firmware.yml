@@ -31,7 +31,7 @@ jobs:
       - name: Compile
         run: |
           arduino-cli compile --fqbn esp32:esp32:XIAO_ESP32S3:PSRAM=opi \
-            --build-property "compiler.cpp.extra_flags=-DWEBSOCKETS_MAX_DATA_SIZE=65536" \
+            --build-property "compiler.cpp.extra_flags=-DWEBSOCKETS_MAX_DATA_SIZE=65536 -DFW_BUILD=${{ github.run_number }}" \
             --output-dir out firmware/glasses
           ls -la out
           cp out/glasses.ino.merged.bin glasses-firmware-${{ github.run_number }}.bin
