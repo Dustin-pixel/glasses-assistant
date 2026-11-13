@@ -367,9 +367,9 @@ void portal() {
   It shows exactly what the round display shows, has the button on screen, and can take a photo,
   so everything can be tested with just the XIAO.
 */
-const char VIRTUAL[] PROGMEM = R"HTML(<!doctype html><meta name=viewport content="width=device-width,initial-scale=1">
+const char VIRTUAL[] PROGMEM = R"HTML(<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
 <title>Glasses</title><style>
-body{margin:0;background:#0d0f12;color:#e8eaed;font:15px system-ui;display:flex;flex-direction:column;align-items:center;padding:16px;gap:14px}
+body{margin:0;background:#0d0f12;color:#e8eaed;font:15px system-ui;display:flex;flex-direction:column;align-items:center;padding:28px 16px;gap:18px}
 .lens{width:min(84vw,360px);aspect-ratio:1;border-radius:50%;overflow:hidden;box-shadow:0 0 0 10px #22262c,0 0 0 12px #3a3f47}
 canvas{width:100%;height:100%;image-rendering:auto}
 .row{display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
