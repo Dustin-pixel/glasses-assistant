@@ -1,0 +1,50 @@
+name: Build glasses firmware
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "firmware/**"
+      - ".github/workflows/build-firmware.yml"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write   # to publish the firmware as a release
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: arduino/setup-arduino-cli@v2
+
+      - name: Install the ESP32 core and libraries
+        run: |
+          arduino-cli config init
+          arduino-cli config add board_manager.additional_urls \
+            https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json
+          arduino-cli core update-index
+          arduino-cli core install esp32:esp32@3.1.1
+          arduino-cli lib install "Adafruit GC9A01A" "Adafruit GFX Library" "WebSockets" "TJpg_Decoder" "ArduinoJson"
+
+      - name: Compile
+        run: |
+          arduino-cli compile --fqbn esp32:esp32:XIAO_ESP32S3:PSRAM=opi \
+            --build-property "compiler.cpp.extra_flags=-DWEBSOCKETS_MAX_DATA_SIZE=65536" \
+            --output-dir out firmware/glasses
+          ls -la out
+          cp out/glasses.ino.merged.bin glasses-firmware-${{ github.run_number }}.bin
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: firmware-${{ github.run_number }}
+          name: Glasses firmware ${{ github.run_number }}
+          body: |
+            Firmware for the XIAO ESP32S3 Sense glasses. To install from a computer with Chrome or Edge:
+            1. Plug the XIAO into the computer with a USB-C data cable.
+            2. Open https://espressif.github.io/esptool-js/ , set the baud rate to 921600 and click Connect, then pick the XIAO's port.
+            3. Under Flash Address enter 0x0 and choose the .bin below, then click Program.
+            4. Unplug and replug the XIAO. It shows "Join Wi-Fi Glasses-Setup" on its screen.
+          files: glasses-firmware-${{ github.run_number }}.bin

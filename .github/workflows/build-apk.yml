@@ -10,6 +10,8 @@ on:
       - ".github/workflows/build-windows.yml"
       - ".github/workflows/voicepack.yml"
       - "tools/**"
+      - "firmware/**"
+      - ".github/workflows/build-firmware.yml"
   workflow_dispatch: {}
 
 permissions:
