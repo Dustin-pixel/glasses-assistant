@@ -77,6 +77,13 @@ String overlayPos = "bottom";
 uint32_t overlayUntil = 0;
 String statusLine = "Starting";
 
+// For the virtual display page (works with or without the real display attached).
+uint32_t screenVersion = 0;      // goes up every time the picture changes
+uint32_t framesIn = 0;           // streamed pictures received from the phone
+uint32_t presses = 0;
+String linkHost;
+String skinName = "default";
+
 // ---------------------------------------------------------------- drawing
 
 /** Width of the circle available to a line of text whose middle is at y. */
@@ -163,6 +170,7 @@ void compose() {
     }
   }
   tft.drawRGBBitmap(0, 0, screen->getBuffer(), SIZE, SIZE);
+  screenVersion++;
 }
 
 void setStatus(const String &s) {
@@ -245,6 +253,7 @@ void onMessage(uint8_t *payload, size_t len) {
     cAccent = doc["accent"] | cAccent;
     cBg = doc["bg"] | cBg;
     cText = doc["text"] | cText;
+    skinName = (const char *)(doc["name"] | "default");
     compose();
   } else if (!strcmp(type, "stream_end")) {
     streaming = false;
@@ -259,7 +268,8 @@ void onWs(WStype_t type, uint8_t *payload, size_t len) {
     case WStype_CONNECTED: {
       linked = true;
       sendText(String("{\"type\":\"hello\",\"token\":\"") + token +
-                 "\",\"device\":\"xiao-glasses\",\"fw\":\"" FW_VERSION "\"}");
+                 "\",\"device\":\"xiao-glasses\",\"fw\":\"" FW_VERSION "\",\"ip\":\"" +
+                 WiFi.localIP().toString() + "\"}");
       compose();
       break;
     }
@@ -273,6 +283,7 @@ void onWs(WStype_t type, uint8_t *payload, size_t len) {
       // A streamed picture: decode, draw, then tell the phone it can send the next one.
       if (TJpgDec.drawJpg(0, 0, payload, len) == JDR_OK) {
         streaming = true;
+        framesIn++;
         compose();
       }
       ws.sendTXT("{\"type\":\"frame_ack\"}");
@@ -291,6 +302,7 @@ bool buttonDown() { return digitalRead(BUTTON_BOOT) == LOW || digitalRead(BUTTON
 
 void sendPress(const char *kind) {
   if (!linked) return;
+  presses++;
   sendText(String("{\"type\":\"button\",\"press\":\"") + kind + "\"}");
 }
 
@@ -348,6 +360,79 @@ void portal() {
   while (true) { dns.processNextRequest(); web.handleClient(); delay(5); }
 }
 
+// ---------------------------------------------------------------- virtual display
+
+/*
+  Open http://<glasses address>/ on the phone (the app shows the address once the glasses connect).
+  It shows exactly what the round display shows, has the button on screen, and can take a photo,
+  so everything can be tested with just the XIAO.
+*/
+const char VIRTUAL[] PROGMEM = R"HTML(<!doctype html><meta name=viewport content="width=device-width,initial-scale=1">
+<title>Glasses</title><style>
+body{margin:0;background:#0d0f12;color:#e8eaed;font:15px system-ui;display:flex;flex-direction:column;align-items:center;padding:16px;gap:14px}
+.lens{width:min(84vw,360px);aspect-ratio:1;border-radius:50%;overflow:hidden;box-shadow:0 0 0 10px #22262c,0 0 0 12px #3a3f47}
+canvas{width:100%;height:100%;image-rendering:auto}
+.row{display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
+button{background:#22262c;color:#e8eaed;border:1px solid #3a3f47;border-radius:22px;padding:12px 16px;font-size:15px}
+button:active{background:#3a3f47}#st{font:13px ui-monospace,monospace;color:#9aa0a6;white-space:pre-line;text-align:center}
+img{max-width:min(92vw,480px);border-radius:10px}</style>
+<div class=lens><canvas id=c width=240 height=240></canvas></div>
+<div class=row><button onclick="press('short')">Press · talk</button><button onclick="press('double')">Double · switch display</button>
+<button onclick="press('long')">Hold · hush</button></div>
+<div class=row><button onclick="photo()">Take a photo</button></div>
+<div id=st>Connecting…</div><img id=ph hidden>
+<script>
+const c=document.getElementById('c').getContext('2d'),img=c.createImageData(240,240);let v=0;
+async function frame(){try{const r=await fetch('/screen?v='+v);if(r.status==200){v=+r.headers.get('X-Version');
+const b=new Uint8Array(await r.arrayBuffer()),d=img.data;for(let i=0,j=0;i<b.length;i+=2,j+=4){const p=b[i]|b[i+1]<<8;
+d[j]=(p>>11)<<3;d[j+1]=((p>>5)&63)<<2;d[j+2]=(p&31)<<3;d[j+3]=255}c.putImageData(img,0,0)}}catch(e){}setTimeout(frame,document.hidden?1000:200)}
+async function status(){try{const s=await (await fetch('/status')).json();document.getElementById('st').textContent=
+(s.linked?'Linked to the app at '+s.phone:'Not linked: looking for the app at '+s.phone)+'\nSkin: '+s.skin+' · Wi-Fi '+s.ssid+' ('+s.rssi+' dBm)'+
+'\nCamera: '+(s.camera?'working':'not found')+' · Streamed pictures: '+s.frames+' · Presses sent: '+s.presses+
+'\nFree PSRAM: '+Math.round(s.psram/1024)+' KB · Up '+s.uptime+' s'}catch(e){
+document.getElementById('st').textContent='Lost contact with the glasses'}setTimeout(status,2000)}
+function press(k){fetch('/press?kind='+k)}
+function photo(){const p=document.getElementById('ph');p.hidden=false;p.src='/photo?t='+Date.now()}
+frame();status();
+</script>)HTML";
+
+void startVirtualDisplay() {
+  web.on("/", []() { web.send_P(200, "text/html", VIRTUAL); });
+  web.on("/screen", []() {
+    if (web.arg("v").toInt() == (long)screenVersion) { web.send(204); return; }
+    web.sendHeader("X-Version", String(screenVersion));
+    web.sendHeader("Cache-Control", "no-store");
+    web.setContentLength(SIZE * SIZE * 2);
+    web.send(200, "application/octet-stream", "");
+    web.sendContent((const char *)screen->getBuffer(), SIZE * SIZE * 2);
+  });
+  web.on("/press", []() {
+    String k = web.arg("kind");
+    if (k == "short" || k == "double" || k == "long") sendPress(k.c_str());
+    web.send(linked ? 200 : 409, "text/plain", linked ? "ok" : "not linked to the app");
+  });
+  web.on("/photo", []() {
+    if (!cameraOk) { web.send(503, "text/plain", "camera not found"); return; }
+    camera_fb_t *fb = esp_camera_fb_get();
+    if (fb) esp_camera_fb_return(fb);   // drop a stale frame
+    fb = esp_camera_fb_get();
+    if (!fb) { web.send(503, "text/plain", "no frame"); return; }
+    web.sendHeader("Cache-Control", "no-store");
+    web.send_P(200, "image/jpeg", (const char *)fb->buf, fb->len);
+    esp_camera_fb_return(fb);
+  });
+  web.on("/status", []() {
+    JsonDocument d;
+    d["linked"] = linked; d["phone"] = linkHost; d["ssid"] = ssid; d["rssi"] = WiFi.RSSI();
+    d["camera"] = cameraOk; d["frames"] = framesIn; d["presses"] = presses; d["skin"] = skinName;
+    d["streaming"] = streaming; d["psram"] = ESP.getFreePsram(); d["uptime"] = millis() / 1000;
+    d["display"] = false; d["fw"] = FW_VERSION;
+    String out; serializeJson(d, out);
+    web.send(200, "application/json", out);
+  });
+  web.begin();
+}
+
 // ---------------------------------------------------------------- main
 
 void setup() {
@@ -402,6 +487,9 @@ void setup() {
   }
   // On a phone hotspot, the phone is the gateway.
   String host = phoneIp.length() ? phoneIp : WiFi.gatewayIP().toString();
+  linkHost = host;
+  Serial.println("Glasses address: http://" + WiFi.localIP().toString() + "/  (virtual display)");
+  startVirtualDisplay();
   setStatus("Looking for the app...");
   ws.begin(host, LINK_PORT, "/");
   ws.onEvent(onWs);
@@ -414,6 +502,7 @@ bool overlayShown = false;
 
 void loop() {
   ws.loop();
+  web.handleClient();
   pollButton();
   uint32_t now = millis();
 

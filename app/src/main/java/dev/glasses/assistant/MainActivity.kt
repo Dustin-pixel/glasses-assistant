@@ -271,7 +271,15 @@ private fun HomeScreen(skinId: String, onSkin: (String) -> Unit) {
         Card(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(if (state.running) "Service: running" else "Service: stopped")
-                Text("Glasses: ${state.glasses ?: "not connected"}")
+                Text("Glasses: ${state.glasses?.let { g -> state.glassesIp?.let { "$g at $it" } ?: g } ?: "not connected"}")
+                state.glassesIp?.let { ip ->
+                    val ctx = LocalContext.current
+                    OutlinedButton(onClick = {
+                        ctx.startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse("http://$ip/")))
+                    }) { Text("Open the glasses' screen") }
+                    Text("Shows what the round display shows, with the button on screen. Works without a display attached.",
+                        style = MaterialTheme.typography.bodySmall)
+                }
                 Text("State: ${state.phase}")
                 Text("Link: port ${Config.LINK_PORT}, token ${config.linkToken}",
                     style = MaterialTheme.typography.bodySmall)

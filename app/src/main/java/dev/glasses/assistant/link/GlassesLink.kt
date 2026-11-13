@@ -14,7 +14,7 @@ import java.net.InetSocketAddress
 import java.nio.ByteBuffer
 
 sealed interface LinkEvent {
-    data class Connected(val device: String) : LinkEvent
+    data class Connected(val device: String, val ip: String?) : LinkEvent
     data object Disconnected : LinkEvent
     data class ButtonPressed(val press: String) : LinkEvent   // short, long or double
     data object FrameAck : LinkEvent
@@ -57,7 +57,7 @@ class GlassesLink(
                 if (type == Protocol.HELLO && msg.optString("token") == token) {
                     glasses?.close(1000, "replaced")
                     glasses = conn
-                    onEvent(LinkEvent.Connected(msg.optString("device", "glasses")))
+                    onEvent(LinkEvent.Connected(msg.optString("device", "glasses"), msg.optString("ip").ifBlank { null }))
                 } else {
                     conn.close(4001, "unauthorized")
                 }

@@ -70,6 +70,7 @@ data class AssistantState(
     val voice: String = "",                // which voice is speaking, and why
     val display: Source = Source.None,     // what's streaming to the glasses display
     val mirrorAllowed: Boolean = false,    // screen capture granted for this session
+    val glassesIp: String? = null,         // the glasses' own address (virtual display page)
 )
 
 /** One spoken line in Argue mode. skinId is "user" for the person wearing the glasses. */
@@ -173,12 +174,12 @@ class AssistantService : Service() {
     private fun onLinkEvent(event: LinkEvent) {
         when (event) {
             is LinkEvent.Connected -> {
-                _state.update { it.copy(glasses = event.device) }
+                _state.update { it.copy(glasses = event.device, glassesIp = event.ip) }
                 link.send(Protocol.skin(config.skinId))
                 link.send(Protocol.overlay(config.skin.ready, ttlMs = 2000))
                 resendDisplay()
             }
-            LinkEvent.Disconnected -> _state.update { it.copy(glasses = null) }
+            LinkEvent.Disconnected -> _state.update { it.copy(glasses = null, glassesIp = null) }
             is LinkEvent.ButtonPressed -> when (event.press) {
                 "double" -> cycleDisplay()                       // off -> now playing -> mirror -> off
                 "long" -> { turn?.cancel(); displayControl.showOff() }   // hush and clear the display
