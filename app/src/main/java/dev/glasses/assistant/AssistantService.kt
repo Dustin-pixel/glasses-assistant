@@ -14,7 +14,25 @@ import android.os.Looper
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
+import android.app.Activity
+import android.media.projection.MediaProjectionManager
 import dev.glasses.assistant.brain.Brain
+import dev.glasses.assistant.brain.DisplayControl
+import dev.glasses.assistant.brain.GestureTool
+import dev.glasses.assistant.brain.MediaTool
+import dev.glasses.assistant.brain.OpenAppTool
+import dev.glasses.assistant.brain.ReadScreenTool
+import dev.glasses.assistant.brain.ShowScreenTool
+import dev.glasses.assistant.brain.TapTool
+import dev.glasses.assistant.brain.TypeTool
+import dev.glasses.assistant.control.ControlService
+import dev.glasses.assistant.display.Crop
+import dev.glasses.assistant.display.GlassesScreen
+import dev.glasses.assistant.display.MirrorConsentActivity
+import dev.glasses.assistant.display.NowPlayingCard
+import dev.glasses.assistant.display.ScreenMirror
+import dev.glasses.assistant.display.Source
+import dev.glasses.assistant.display.TextCard
 import dev.glasses.assistant.brain.LookTool
 import dev.glasses.assistant.brain.ShowOnDisplayTool
 import dev.glasses.assistant.brain.TimeTool
@@ -50,6 +68,8 @@ data class AssistantState(
     val error: String? = null,
     val debate: List<DebateLine> = emptyList(),
     val voice: String = "",                // which voice is speaking, and why
+    val display: Source = Source.None,     // what's streaming to the glasses display
+    val mirrorAllowed: Boolean = false,    // screen capture granted for this session
 )
 
 /** One spoken line in Argue mode. skinId is "user" for the person wearing the glasses. */
@@ -81,11 +101,22 @@ class AssistantService : Service() {
         }
         loadNeuralVoice()
         link = GlassesLink(Config.LINK_PORT, config.linkToken, ::onLinkEvent)
+        screen = GlassesScreen(link, scope)
+        nowPlaying = NowPlayingCard(this, screen) { config.skin }
+        textCard = TextCard(screen) { config.skin }
+        scope.launch { screen.source.collect { s -> _state.update { it.copy(display = s) } } }
 
         val tools = ToolRegistry(
             listOf(
                 LookTool(link),
                 ShowOnDisplayTool(link),
+                ShowScreenTool(displayControl),
+                MediaTool(this),
+                OpenAppTool(this),
+                GestureTool(),
+                ReadScreenTool(),
+                TapTool(),
+                TypeTool(),
                 TimeTool(),
                 TimerTool(scope) { label ->
                     val msg = config.skin.timerDone(label)
@@ -122,6 +153,15 @@ class AssistantService : Service() {
                     }
                 }
             }
+            ACTION_DISPLAY -> when (intent.getStringExtra(EXTRA_MODE)) {
+                "now_playing" -> displayControl.showNowPlaying()
+                "mirror" -> displayControl.showMirror(Crop.Auto, null, null)
+                else -> displayControl.showOff()
+            }
+            ACTION_MIRROR_RESULT -> onMirrorAnswer(
+                intent.getIntExtra(EXTRA_RESULT, Activity.RESULT_CANCELED),
+                @Suppress("DEPRECATION") intent.getParcelableExtra<Intent>(EXTRA_DATA),
+            )
             ACTION_SKIN -> {
                 link.send(Protocol.skin(config.skinId))
                 link.send(Protocol.overlay(config.skin.ready, ttlMs = 2000))
@@ -136,9 +176,15 @@ class AssistantService : Service() {
                 _state.update { it.copy(glasses = event.device) }
                 link.send(Protocol.skin(config.skinId))
                 link.send(Protocol.overlay(config.skin.ready, ttlMs = 2000))
+                resendDisplay()
             }
             LinkEvent.Disconnected -> _state.update { it.copy(glasses = null) }
-            LinkEvent.ButtonPressed -> startTurn()
+            is LinkEvent.ButtonPressed -> when (event.press) {
+                "double" -> cycleDisplay()                       // off -> now playing -> mirror -> off
+                "long" -> { turn?.cancel(); displayControl.showOff() }   // hush and clear the display
+                else -> startTurn()
+            }
+            LinkEvent.FrameAck -> screen.onAck()
             is LinkEvent.Status -> Log.d(TAG, "Glasses status: ${event.json}")
         }
     }
@@ -325,12 +371,135 @@ class AssistantService : Service() {
         speechOut.speak(text, skin)
     }
 
+    // ---------------------------------------------------------------- glasses display
+
+    private lateinit var screen: GlassesScreen
+    private lateinit var nowPlaying: NowPlayingCard
+    private lateinit var textCard: TextCard
+    @Volatile private var mirror: ScreenMirror? = null
+    private var mirrorWanted: Triple<Crop, Float?, Float?>? = null
+
+    private val displayControl = object : DisplayControl {
+        override fun showNowPlaying(): String {
+            textCard.stop()
+            screen.setSource(Source.NowPlaying)
+            nowPlaying.start(scope)
+            return if (dev.glasses.assistant.display.Media.hasAccess(this@AssistantService)) "Showing what's playing."
+            else "Showing the card, but Notification access is off, so it can't see the music. " +
+                "Tell the user to turn it on in the Glasses Assistant app."
+        }
+
+        override fun showMirror(crop: Crop, zoom: Float?, pan: Float?): String {
+            textCard.stop()
+            val m = mirror
+            if (m != null && m.running) {
+                m.crop = crop
+                zoom?.let { m.zoom = it }
+                pan?.let { m.pan = it }
+                screen.setSource(Source.Mirror)
+                m.refresh()
+                return "Mirroring the phone screen (${crop.name.lowercase()} crop)."
+            }
+            mirrorWanted = Triple(crop, zoom, pan)
+            return askToMirror()
+        }
+
+        override fun showText(title: String, text: String): String {
+            if (text.isBlank()) return "Nothing to show."
+            val back = screen.source.value.takeIf { it != Source.Text } ?: Source.None
+            textCard.show(scope, title, text, back)
+            return "Showing it on the glasses."
+        }
+
+        override fun showOff(): String {
+            textCard.stop()
+            screen.setSource(Source.None)
+            return "Display back to normal."
+        }
+    }
+
+    private fun cycleDisplay() {
+        when (screen.source.value) {
+            Source.None -> displayControl.showNowPlaying()
+            Source.NowPlaying -> displayControl.showMirror(Crop.Auto, null, null)
+            else -> displayControl.showOff()
+        }
+        link.send(Protocol.overlay(when (screen.source.value) {
+            Source.NowPlaying -> "Now playing"; Source.Mirror -> "Screen"; else -> "Display off"
+        }, ttlMs = 1200))
+    }
+
+    /** After the glasses reconnect, draw whatever was showing again. */
+    private fun resendDisplay() {
+        when (screen.source.value) {
+            Source.NowPlaying -> nowPlaying.start(scope)
+            Source.Mirror -> mirror?.refresh()
+            else -> {}
+        }
+    }
+
+    /**
+     * Android asks the user before any app can capture the screen, from a visible screen. With Phone
+     * control on (or the app open) the prompt appears straight away; otherwise a notification asks.
+     */
+    private fun askToMirror(): String {
+        val intent = Intent(this, MirrorConsentActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        val shown = ControlService.instance?.launch(intent) == true ||
+            (appVisible && runCatching { startActivity(intent); true }.getOrDefault(false))
+        if (shown) {
+            return "Asked on the phone: the user needs to tap Start now (choose \"Entire screen\" to mirror any app). " +
+                "After that it starts by itself."
+        }
+        val tap = PendingIntent.getActivity(this, 4, intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        getSystemService(NotificationManager::class.java).notify(MIRROR_NOTIFICATION, NotificationCompat.Builder(this, ALERTS)
+            .setSmallIcon(android.R.drawable.ic_menu_view)
+            .setContentTitle("Show your screen on the glasses?")
+            .setContentText("Tap, then Start now.")
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setContentIntent(tap)
+            .setAutoCancel(true)
+            .build())
+        return "Sent a notification on the phone: the user taps it, then Start now, and mirroring begins."
+    }
+
+    private fun onMirrorAnswer(resultCode: Int, data: Intent?) {
+        getSystemService(NotificationManager::class.java).cancel(MIRROR_NOTIFICATION)
+        if (resultCode != Activity.RESULT_OK || data == null) {
+            mirrorWanted = null
+            link.send(Protocol.overlay("Screen sharing declined", ttlMs = 2500))
+            return
+        }
+        // Android 14+: the service must be a screen-capture service before it gets the capture.
+        startInForeground(withCapture = true)
+        val mpm = getSystemService(MediaProjectionManager::class.java)
+        val projection = runCatching { mpm.getMediaProjection(resultCode, data) }.getOrNull() ?: return
+        val m = ScreenMirror(this, projection, screen, { ControlService.instance?.foreground }) {
+            mirror = null
+            _state.update { it.copy(mirrorAllowed = false) }
+            if (screen.source.value == Source.Mirror) screen.setSource(Source.None)
+            startInForeground(withCapture = false)
+        }
+        runCatching { m.start() }.onFailure {
+            Log.e(TAG, "Mirror failed to start", it)
+            link.send(Protocol.overlay("Couldn't start screen sharing", ttlMs = 3000))
+            return
+        }
+        mirror = m
+        _state.update { it.copy(mirrorAllowed = true) }
+        val (crop, zoom, pan) = mirrorWanted ?: Triple(Crop.Auto, null, null)
+        mirrorWanted = null
+        displayControl.showMirror(crop, zoom, pan)
+    }
+
     private fun setPhase(phase: Phase) = _state.update { it.copy(phase = phase) }
 
-    private fun startInForeground() {
+    private fun startInForeground(withCapture: Boolean = false) {
         val nm = getSystemService(NotificationManager::class.java)
         nm.createNotificationChannel(
             NotificationChannel(CHANNEL, "Assistant", NotificationManager.IMPORTANCE_LOW)
+        )
+        nm.createNotificationChannel(
+            NotificationChannel(ALERTS, "Requests", NotificationManager.IMPORTANCE_HIGH)
         )
         val talk = PendingIntent.getService(
             this, 1, Intent(this, AssistantService::class.java).setAction(ACTION_TALK),
@@ -353,12 +522,14 @@ class AssistantService : Service() {
             .setOngoing(true)
             .build()
 
-        ServiceCompat.startForeground(
-            this, NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE,
-        )
+        val types = ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE or
+            (if (withCapture) ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION else 0)
+        ServiceCompat.startForeground(this, NOTIFICATION_ID, notification, types)
     }
 
     override fun onDestroy() {
+        mirror?.stop()
+        mirror = null
         scope.cancel()
         neural?.release()
         neural = null
@@ -375,6 +546,16 @@ class AssistantService : Service() {
         private const val TAG = "AssistantService"
         private const val CHANNEL = "assistant"
         private const val NOTIFICATION_ID = 1
+        private const val MIRROR_NOTIFICATION = 2
+        private const val ALERTS = "requests"
+        const val ACTION_DISPLAY = "dev.glasses.assistant.DISPLAY"
+        const val ACTION_MIRROR_RESULT = "dev.glasses.assistant.MIRROR_RESULT"
+        const val EXTRA_MODE = "mode"
+        const val EXTRA_RESULT = "result"
+        const val EXTRA_DATA = "data"
+
+        /** Set by the main screen while it's open; then the app may show the capture prompt itself. */
+        @Volatile var appVisible = false
         const val ACTION_TALK = "dev.glasses.assistant.TALK"
         const val ACTION_STOP = "dev.glasses.assistant.STOP"
         const val ACTION_SKIN = "dev.glasses.assistant.SKIN"
@@ -426,6 +607,14 @@ class AssistantService : Service() {
 
         fun testVoice(context: Context) =
             context.startService(Intent(context, AssistantService::class.java).setAction(ACTION_TEST_VOICE))
+
+        /** From the app: "now_playing", "mirror" or "off". */
+        fun display(context: Context, mode: String) =
+            context.startService(Intent(context, AssistantService::class.java).setAction(ACTION_DISPLAY).putExtra(EXTRA_MODE, mode))
+
+        fun mirrorAnswer(context: Context, resultCode: Int, data: Intent?) =
+            context.startService(Intent(context, AssistantService::class.java).setAction(ACTION_MIRROR_RESULT)
+                .putExtra(EXTRA_RESULT, resultCode).putExtra(EXTRA_DATA, data))
 
         fun stop(context: Context) =
             context.startService(Intent(context, AssistantService::class.java).setAction(ACTION_STOP))

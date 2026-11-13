@@ -43,8 +43,22 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.glasses.assistant.voice.VoicePack
+import android.content.Intent
+import android.provider.Settings
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.asImageBitmap
+import dev.glasses.assistant.control.ControlService
+import dev.glasses.assistant.display.GlassesScreen
+import dev.glasses.assistant.display.Media
+import dev.glasses.assistant.display.Source
 
 class MainActivity : ComponentActivity() {
+    override fun onResume() { super.onResume(); AssistantService.appVisible = true }
+    override fun onPause() { AssistantService.appVisible = false; super.onPause() }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val config = Config(this)
@@ -68,6 +82,82 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             }
+        }
+    }
+}
+
+/** What the glasses display shows, with a live round preview of what's being sent. */
+@Composable
+private fun DisplayCard() {
+    val context = LocalContext.current
+    val state by AssistantService.state.collectAsStateWithLifecycle()
+    val preview by GlassesScreen.preview.collectAsStateWithLifecycle()
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Glasses display", style = MaterialTheme.typography.titleMedium)
+            Text("Or just ask: \"show what's playing\", \"put my screen on the glasses\", \"stop showing that\". " +
+                "Double-press the glasses button to switch.", style = MaterialTheme.typography.bodySmall)
+            if (state.running) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(selected = state.display == Source.None, onClick = { AssistantService.display(context, "off") },
+                        label = { Text("Normal") })
+                    FilterChip(selected = state.display == Source.NowPlaying, onClick = { AssistantService.display(context, "now_playing") },
+                        label = { Text("Now playing") })
+                    FilterChip(selected = state.display == Source.Mirror, onClick = { AssistantService.display(context, "mirror") },
+                        label = { Text("Screen") })
+                }
+                preview?.takeIf { state.display != Source.None }?.let { bmp ->
+                    Image(bmp.asImageBitmap(), contentDescription = "What the glasses show",
+                        modifier = Modifier.size(200.dp).clip(CircleShape).align(Alignment.CenterHorizontally))
+                }
+            } else {
+                Text("Start the assistant to use the display.", style = MaterialTheme.typography.bodySmall)
+            }
+        }
+    }
+}
+
+/** Permissions that let the assistant use the phone for you, and web search. */
+@Composable
+private fun PhoneCard(config: Config) {
+    val context = LocalContext.current
+    var search by remember { mutableStateOf(config.webSearch) }
+    // Re-check whenever the screen comes back from Settings.
+    var tick by remember { mutableStateOf(0) }
+    val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    androidx.compose.runtime.DisposableEffect(lifecycle) {
+        val obs = androidx.lifecycle.LifecycleEventObserver { _, e ->
+            if (e == androidx.lifecycle.Lifecycle.Event.ON_RESUME) tick++
+        }
+        lifecycle.lifecycle.addObserver(obs)
+        onDispose { lifecycle.lifecycle.removeObserver(obs) }
+    }
+    val control = remember(tick) { ControlService.isEnabled(context) }
+    val media = remember(tick) { Media.hasAccess(context) }
+
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Phone and web", style = MaterialTheme.typography.titleMedium)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Switch(checked = search, onCheckedChange = { search = it; config.webSearch = it })
+                Text("Search the web (about 1¢ a search)", Modifier.padding(start = 12.dp))
+            }
+            Text(if (media) "✓ Music access: sees and controls what's playing" else
+                "Music access lets it show and control what's playing (Spotify, YouTube…).",
+                style = MaterialTheme.typography.bodyMedium)
+            if (!media) OutlinedButton(onClick = {
+                context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+            }) { Text("Turn on music access") }
+            Text(if (control) "✓ Phone control: opens apps, swipes, reads and types for you" else
+                "Phone control lets it open apps, swipe to the next TikTok, read the screen and type into the Claude app.",
+                style = MaterialTheme.typography.bodyMedium)
+            if (!control) OutlinedButton(onClick = {
+                context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+            }) { Text("Turn on phone control") }
+            if (!control || !media) Text(
+                "Find Glasses Assistant in the list and switch it on. If Android says it's a restricted setting: " +
+                    "open Settings › Apps › Glasses Assistant, tap ⋮ at the top right, choose Allow restricted settings, then try again.",
+                style = MaterialTheme.typography.bodySmall)
         }
     }
 }
@@ -199,6 +289,8 @@ private fun HomeScreen(skinId: String, onSkin: (String) -> Unit) {
             label = { Text("Model") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
         )
 
+        DisplayCard()
+        PhoneCard(config)
         VoicesCard(config)
 
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {

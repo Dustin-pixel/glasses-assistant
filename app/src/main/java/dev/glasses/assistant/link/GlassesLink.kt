@@ -16,7 +16,8 @@ import java.nio.ByteBuffer
 sealed interface LinkEvent {
     data class Connected(val device: String) : LinkEvent
     data object Disconnected : LinkEvent
-    data object ButtonPressed : LinkEvent
+    data class ButtonPressed(val press: String) : LinkEvent   // short, long or double
+    data object FrameAck : LinkEvent
     data class Status(val json: JSONObject) : LinkEvent
 }
 
@@ -64,7 +65,8 @@ class GlassesLink(
             }
 
             when (type) {
-                Protocol.BUTTON -> onEvent(LinkEvent.ButtonPressed)
+                Protocol.BUTTON -> onEvent(LinkEvent.ButtonPressed(msg.optString("press", "short")))
+                Protocol.FRAME_ACK -> onEvent(LinkEvent.FrameAck)
                 Protocol.STATUS -> onEvent(LinkEvent.Status(msg))
                 Protocol.CAPTURE_FAILED -> pendingFrame?.completeExceptionally(
                     IOException("Camera error: ${msg.optString("reason", "unknown")}")
@@ -98,7 +100,13 @@ class GlassesLink(
     }
 
     fun send(json: String) {
-        glasses?.takeIf { it.isOpen }?.send(json)
+        runCatching { glasses?.takeIf { it.isOpen }?.send(json) }
+    }
+
+    /** A 240x240 JPEG for the display. Returns false if the glasses aren't connected. */
+    fun sendFrame(jpeg: ByteArray): Boolean {
+        val conn = glasses?.takeIf { it.isOpen } ?: return false
+        return runCatching { conn.send(jpeg) }.isSuccess
     }
 
     /** Asks the glasses for one JPEG frame and waits for it. */

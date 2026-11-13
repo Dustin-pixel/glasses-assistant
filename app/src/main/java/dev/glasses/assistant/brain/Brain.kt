@@ -39,6 +39,7 @@ class Brain(private val config: Config, private val tools: ToolRegistry) {
             if (historySkin != config.skinId) { history.clear(); historySkin = config.skinId }
             val rollback = history.size
             stripOldImages()
+            compactOldSearches()
             history.add(JSONObject().put("role", "user").put("content", userText))
             trimHistory()
 
@@ -48,8 +49,11 @@ class Brain(private val config: Config, private val tools: ToolRegistry) {
                     val content = response.getJSONArray("content")
                     history.add(JSONObject().put("role", "assistant").put("content", content))
 
-                    if (response.optString("stop_reason") != "tool_use") {
-                        return@withContext textOf(content).ifBlank { "Done." }
+                    when (response.optString("stop_reason")) {
+                        "tool_use" -> {}
+                        // A long web search paused; send the conversation back so it carries on.
+                        "pause_turn" -> return@repeat
+                        else -> return@withContext textOf(content).ifBlank { "Done." }
                     }
 
                     val results = JSONArray()
@@ -103,7 +107,7 @@ class Brain(private val config: Config, private val tools: ToolRegistry) {
             .put("model", config.model)
             .put("max_tokens", 1024)
             .put("system", systemPrompt())
-            .put("tools", tools.definitions())
+            .put("tools", tools.definitions().apply { if (config.webSearch) put(webSearchTool()) })
             .put("messages", JSONArray(history))
     )
 
@@ -139,12 +143,56 @@ class Brain(private val config: Config, private val tools: ToolRegistry) {
         }
     }
 
+    /** The spoken answer. After a web search, only what came after the results ("Let me look that up" is dropped). */
     private fun textOf(content: JSONArray): String = buildString {
+        var start = 0
         for (i in 0 until content.length()) {
+            if (content.getJSONObject(i).optString("type") == "web_search_tool_result") start = i + 1
+        }
+        if (start >= content.length()) start = 0
+        for (i in start until content.length()) {
             val block = content.getJSONObject(i)
             if (block.optString("type") == "text") append(block.getString("text"))
         }
     }.trim()
+
+    /**
+     * Claude's built-in web search, run on Anthropic's side (billed per search on the API key).
+     * The phone's time zone hints at where the user is, for "near me" and local results.
+     */
+    private fun webSearchTool(): JSONObject = JSONObject()
+        .put("type", "web_search_20250305")
+        .put("name", "web_search")
+        .put("max_uses", 3)
+        .put("user_location", JSONObject()
+            .put("type", "approximate")
+            .put("timezone", java.util.TimeZone.getDefault().id))
+
+    /**
+     * Search results are large and get resent with every message. Once a turn is over, keep only
+     * what was said, dropping the search blocks and citations from earlier assistant messages.
+     */
+    private fun compactOldSearches() {
+        for (msg in history) {
+            if (msg.optString("role") != "assistant") continue
+            val content = msg.optJSONArray("content") ?: continue
+            val kept = JSONArray()
+            var changed = false
+            for (i in 0 until content.length()) {
+                val block = content.getJSONObject(i)
+                when (block.optString("type")) {
+                    "server_tool_use", "web_search_tool_result" -> changed = true
+                    "text" -> {
+                        if (block.has("citations")) changed = true
+                        kept.put(JSONObject().put("type", "text").put("text", block.optString("text")))
+                    }
+                    else -> kept.put(block)
+                }
+            }
+            if (changed) msg.put("content", if (kept.length() == 0) JSONArray().put(
+                JSONObject().put("type", "text").put("text", "(searched the web)")) else kept)
+        }
+    }
 
     /** Images from earlier turns are expensive to resend; replace them with a note. */
     private fun stripOldImages() {
@@ -196,6 +244,12 @@ class Brain(private val config: Config, private val tools: ToolRegistry) {
             no lists, no emoji. Stay in your character's voice the whole time, but get the actual answer across.
             You can see through the glasses camera with the look tool; use it whenever the user refers to something in view.
             Use show_on_display for anything easier to read than hear, such as numbers, directions or codes.
+            Use web_search for anything current or that you aren't sure of: news, scores, prices, opening hours,
+            weather, places nearby, facts to check. Answer from the results in a sentence or two in your own voice,
+            never read out links, and put the key fact (a number, a name, an address) on the display.
+            You can also control the phone: show things on the glasses (show_screen), control music and video
+            (media), open and drive apps (open_app, phone_gesture, read_screen, tap_on_screen, type_on_screen).
+            Ask before sending a message to another person, posting, buying or deleting anything.
             If a tool fails, say so briefly and carry on.
         """.trimIndent()
     }

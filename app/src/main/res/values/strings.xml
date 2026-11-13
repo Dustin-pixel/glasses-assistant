@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="control_description">Lets your glasses assistant use the phone when you ask by voice: open apps, swipe to the next video, scroll, read what\'s on screen, tap buttons and type into text boxes (for example a prompt in the Claude app). It only acts when you ask, and keeps nothing.</string>
+</resources>

@@ -7,6 +7,7 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
 
     <!-- Package visibility for the system speech recognizer and TTS engine (Android 11+) -->
     <queries>
@@ -16,6 +17,24 @@
         <intent>
             <action android:name="android.intent.action.TTS_SERVICE" />
         </intent>
+        <!-- Opening apps by name, and the apps it controls directly -->
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+        <intent>
+            <action android:name="android.media.action.MEDIA_PLAY_FROM_SEARCH" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="https" />
+        </intent>
+        <package android:name="com.spotify.music" />
+        <package android:name="com.google.android.youtube" />
+        <package android:name="com.google.android.apps.youtube.music" />
+        <package android:name="com.zhiliaoapp.musically" />
+        <package android:name="com.ss.android.ugc.trill" />
+        <package android:name="com.anthropic.claude" />
     </queries>
 
     <application
@@ -49,6 +68,38 @@
         <service
             android:name=".AssistantService"
             android:exported="false"
-            android:foregroundServiceType="microphone" />
+            android:foregroundServiceType="microphone|mediaProjection" />
+
+        <!-- Shows Android's screen-sharing prompt, invisibly -->
+        <activity
+            android:name=".display.MirrorConsentActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+
+        <!-- "Music access": lets it see and control what's playing -->
+        <service
+            android:name=".display.MediaListener"
+            android:exported="true"
+            android:label="Glasses Assistant music access"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+
+        <!-- "Phone control": opens apps, swipes, reads and types when asked -->
+        <service
+            android:name=".control.ControlService"
+            android:exported="true"
+            android:label="Glasses Assistant phone control"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/control_service" />
+        </service>
     </application>
 </manifest>

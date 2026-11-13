@@ -31,6 +31,11 @@ class Config(context: Context) {
         get() = prefs.getBoolean(KEY_ARGUE, false)
         set(value) = prefs.edit().putBoolean(KEY_ARGUE, value).apply()
 
+    /** Let the assistant search the web (Claude's web search tool, about $10 per 1,000 searches). */
+    var webSearch: Boolean
+        get() = prefs.getBoolean(KEY_SEARCH, true)
+        set(value) = prefs.edit().putBoolean(KEY_SEARCH, value).apply()
+
     /** Shared secret the glasses must send in their hello, so random hotspot clients can't connect. */
     val linkToken: String
         get() = prefs.getString(KEY_TOKEN, null) ?: UUID.randomUUID().toString().take(8).also {
@@ -46,5 +51,6 @@ class Config(context: Context) {
         private const val KEY_SKIN = "skin"
         private const val KEY_ARGUE = "argue"
         private const val KEY_NEURAL = "neural_voices"
+        private const val KEY_SEARCH = "web_search"
     }
 }
