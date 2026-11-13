@@ -267,6 +267,7 @@ void onWs(WStype_t type, uint8_t *payload, size_t len) {
   switch (type) {
     case WStype_CONNECTED: {
       linked = true;
+      Serial.println("Reached the app, sending token " + token);
       sendText(String("{\"type\":\"hello\",\"token\":\"") + token +
                  "\",\"device\":\"xiao-glasses\",\"fw\":\"" FW_VERSION "\",\"ip\":\"" +
                  WiFi.localIP().toString() + "\"}");
@@ -274,6 +275,7 @@ void onWs(WStype_t type, uint8_t *payload, size_t len) {
       break;
     }
     case WStype_DISCONNECTED:
+      if (linked) Serial.println("The app closed the link. If this repeats right after \"sending token\", the token is wrong.");
       if (linked) { linked = false; streaming = false; setStatus("Looking for the app..."); }
       break;
     case WStype_TEXT:
@@ -327,10 +329,10 @@ DNSServer dns;
 const char PAGE[] PROGMEM = R"HTML(<!doctype html><meta name=viewport content="width=device-width">
 <title>Glasses setup</title><style>body{font:16px system-ui;margin:24px;max-width:420px}input{width:100%;
 padding:10px;margin:4px 0 14px;font-size:16px;box-sizing:border-box}button{padding:12px 20px;font-size:16px}</style>
-<h2>Glasses setup</h2><p>Turn on your phone's hotspot, then enter its details. The token is shown in the
+<h2>Glasses setup</h2><p>Your phone's hotspot must be 2.4 GHz (turn on "Extend compatibility" if it has it). Turn on your phone's hotspot, then enter its details. The token is shown in the
 Glasses Assistant app, on the main screen next to "Link".</p>
 <form method=post action=/save>Hotspot name<input name=ssid value="%SSID%">Hotspot password
-<input name=pass type=password>Link token<input name=token value="%TOKEN%">Phone address
+<input name=pass type=password>Link token<input name=token value="%TOKEN%" autocapitalize=off autocorrect=off spellcheck=false>Phone address
 (leave empty on a hotspot)<input name=phone value="%PHONE%"><button>Save and restart</button></form>)HTML";
 
 void portal() {
@@ -348,7 +350,8 @@ void portal() {
   web.on("/save", HTTP_POST, []() {
     prefs.putString("ssid", web.arg("ssid"));
     if (web.arg("pass").length()) prefs.putString("pass", web.arg("pass"));
-    prefs.putString("token", web.arg("token"));
+    String t = web.arg("token"); t.trim(); t.toLowerCase();
+    prefs.putString("token", t);
     prefs.putString("phone", web.arg("phone"));
     web.send(200, "text/html", "<meta name=viewport content='width=device-width'><h2>Saved.</h2>"
                                "<p>The glasses restart and join your hotspot. Reconnect your phone to its usual Wi-Fi.</p>");
@@ -455,8 +458,10 @@ void setup() {
 
   prefs.begin("glasses");
   ssid = prefs.getString("ssid", "");
+  ssid.trim();
   pass = prefs.getString("pass", "");
   token = prefs.getString("token", "");
+  token.trim(); token.toLowerCase();
   phoneIp = prefs.getString("phone", "");
 
   // Holding BOOT during power-up would start the chip's flashing mode, so setup is asked for

@@ -174,12 +174,17 @@ class AssistantService : Service() {
     private fun onLinkEvent(event: LinkEvent) {
         when (event) {
             is LinkEvent.Connected -> {
-                _state.update { it.copy(glasses = event.device, glassesIp = event.ip) }
+                _state.update { it.copy(glasses = event.device, glassesIp = event.ip,
+                    error = it.error?.takeUnless { e -> e.startsWith("Glasses tried") }) }
                 link.send(Protocol.skin(config.skinId))
                 link.send(Protocol.overlay(config.skin.ready, ttlMs = 2000))
                 resendDisplay()
             }
             LinkEvent.Disconnected -> _state.update { it.copy(glasses = null, glassesIp = null) }
+            is LinkEvent.Rejected -> _state.update {
+                it.copy(error = "Glasses tried to connect with the wrong token \"${event.sentToken}\". " +
+                    "The token is ${config.linkToken}. Redo the glasses' Wi-Fi setup and enter it again.")
+            }
             is LinkEvent.ButtonPressed -> when (event.press) {
                 "double" -> cycleDisplay()                       // off -> now playing -> mirror -> off
                 "long" -> { turn?.cancel(); displayControl.showOff() }   // hush and clear the display

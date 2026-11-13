@@ -15,6 +15,7 @@ import java.nio.ByteBuffer
 
 sealed interface LinkEvent {
     data class Connected(val device: String, val ip: String?) : LinkEvent
+    data class Rejected(val sentToken: String) : LinkEvent
     data object Disconnected : LinkEvent
     data class ButtonPressed(val press: String) : LinkEvent   // short, long or double
     data object FrameAck : LinkEvent
@@ -54,11 +55,14 @@ class GlassesLink(
             val type = msg.optString("type")
 
             if (conn != glasses) {
-                if (type == Protocol.HELLO && msg.optString("token") == token) {
+                // Phone keyboards like to capitalise and add spaces, so compare loosely.
+                val sent = msg.optString("token")
+                if (type == Protocol.HELLO && sent.trim().equals(token.trim(), ignoreCase = true)) {
                     glasses?.close(1000, "replaced")
                     glasses = conn
                     onEvent(LinkEvent.Connected(msg.optString("device", "glasses"), msg.optString("ip").ifBlank { null }))
                 } else {
+                    if (type == Protocol.HELLO) onEvent(LinkEvent.Rejected(sent))
                     conn.close(4001, "unauthorized")
                 }
                 return
