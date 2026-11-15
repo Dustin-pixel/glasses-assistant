@@ -36,6 +36,11 @@ jobs:
           ls -la out
           cp out/glasses.ino.merged.bin glasses-firmware-${{ github.run_number }}.bin
 
+      - name: Compile the camera test
+        run: |
+          arduino-cli compile --fqbn esp32:esp32:XIAO_ESP32S3:PSRAM=opi --output-dir out-camtest firmware/camera_test
+          cp out-camtest/camera_test.ino.merged.bin camera-test.bin
+
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
@@ -47,4 +52,10 @@ jobs:
             2. Open https://espressif.github.io/esptool-js/ , set the baud rate to 921600 and click Connect, then pick the XIAO's port.
             3. Under Flash Address enter 0x0 and choose the .bin below, then click Program.
             4. Unplug and replug the XIAO. It shows "Join Wi-Fi Glasses-Setup" on its screen.
-          files: glasses-firmware-${{ github.run_number }}.bin
+
+            camera-test.bin only tests the camera (flash it the same way). The orange light next to the USB port:
+            steady on = camera working, fast blinking = camera not found, slow blinking = found but no picture.
+            Flash the glasses firmware again afterwards.
+          files: |
+            glasses-firmware-${{ github.run_number }}.bin
+            camera-test.bin
