@@ -11,6 +11,7 @@ import android.content.pm.ServiceInfo
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.Build
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
@@ -109,7 +110,7 @@ class AssistantService : Service() {
 
         val tools = ToolRegistry(
             listOf(
-                LookTool(link),
+                LookTool(::takePhoto),
                 ShowOnDisplayTool(link),
                 ShowScreenTool(displayControl),
                 MediaTool(this),
@@ -141,6 +142,8 @@ class AssistantService : Service() {
             ACTION_CLEAR -> { turn?.cancel(); _state.update { it.copy(debate = emptyList()) } }
             ACTION_STOP -> stopSelf()
             ACTION_VOICES -> loadNeuralVoice()
+            // From the app while it's on screen: the moment Android allows becoming a camera service.
+            ACTION_CAMERA -> runCatching { startInForeground(withCapture = mirror?.running == true) }
             ACTION_TEST_VOICE -> {
                 turn?.cancel()
                 turn = scope.launch {
@@ -504,6 +507,30 @@ class AssistantService : Service() {
         displayControl.showMirror(crop, zoom, pan)
     }
 
+    // ---------------------------------------------------------------- camera
+
+    private val phoneCamera by lazy { dev.glasses.assistant.vision.PhoneCamera(this) }
+
+    /**
+     * A photo for "look". Auto uses the glasses camera and falls back to the phone's back camera when
+     * the glasses aren't connected or their camera fails, so vision can be tested without it.
+     */
+    private suspend fun takePhoto(): dev.glasses.assistant.brain.Photo {
+        val source = config.cameraSource
+        if (source != "phone") {
+            val glassesProblem = runCatching { link.captureFrame() }.fold(
+                onSuccess = { return dev.glasses.assistant.brain.Photo(it, "Photo from the glasses camera, just now.") },
+                onFailure = { it.message ?: "no photo" },
+            )
+            if (source == "glasses") throw java.io.IOException("Glasses camera: $glassesProblem")
+            Log.i(TAG, "Glasses camera unavailable ($glassesProblem); using the phone camera")
+        }
+        val jpeg = phoneCamera.capture()
+        return dev.glasses.assistant.brain.Photo(jpeg,
+            "Photo from the PHONE's back camera just now (the glasses camera isn't being used), " +
+                "so it shows wherever the phone is pointed.")
+    }
+
     private fun setPhase(phase: Phase) = _state.update { it.copy(phase = phase) }
 
     private fun startInForeground(withCapture: Boolean = false) {
@@ -535,9 +562,19 @@ class AssistantService : Service() {
             .setOngoing(true)
             .build()
 
-        val types = ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE or
+        val base = ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE or
             (if (withCapture) ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION else 0)
-        ServiceCompat.startForeground(this, NOTIFICATION_ID, notification, types)
+        // The phone camera needs the service to be a camera service too (Android 11+). Android only
+        // allows that while the app is on screen; if it refuses, carry on without it.
+        val camera = if (Build.VERSION.SDK_INT >= 30 && phoneCamera.hasPermission())
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA else 0
+        try {
+            ServiceCompat.startForeground(this, NOTIFICATION_ID, notification, base or camera)
+        } catch (e: Exception) {
+            if (camera == 0) throw e
+            Log.w(TAG, "Couldn't start as a camera service; the phone camera works only with the app open", e)
+            ServiceCompat.startForeground(this, NOTIFICATION_ID, notification, base)
+        }
     }
 
     override fun onDestroy() {
@@ -573,6 +610,7 @@ class AssistantService : Service() {
         const val ACTION_STOP = "dev.glasses.assistant.STOP"
         const val ACTION_SKIN = "dev.glasses.assistant.SKIN"
         const val ACTION_VOICES = "dev.glasses.assistant.VOICES"
+        const val ACTION_CAMERA = "dev.glasses.assistant.CAMERA"
         const val ACTION_TEST_VOICE = "dev.glasses.assistant.TEST_VOICE"
         const val ACTION_CONTINUE = "dev.glasses.assistant.CONTINUE"
         const val ACTION_CLEAR = "dev.glasses.assistant.CLEAR"
@@ -612,6 +650,12 @@ class AssistantService : Service() {
             context.startService(Intent(context, AssistantService::class.java).setAction(ACTION_CLEAR))
 
         /** Tell a running service the voice pack was installed, so it loads the neural voice. */
+        fun cameraChanged(context: Context) {
+            if (state.value.running) {
+                context.startService(Intent(context, AssistantService::class.java).setAction(ACTION_CAMERA))
+            }
+        }
+
         fun voicesChanged(context: Context) {
             if (state.value.running) {
                 context.startService(Intent(context, AssistantService::class.java).setAction(ACTION_VOICES))

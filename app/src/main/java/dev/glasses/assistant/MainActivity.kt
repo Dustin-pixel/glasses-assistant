@@ -142,6 +142,21 @@ private fun PhoneCard(config: Config) {
                 Switch(checked = search, onCheckedChange = { search = it; config.webSearch = it })
                 Text("Search the web (about 1¢ a search)", Modifier.padding(start = 12.dp))
             }
+            var camera by remember { mutableStateOf(config.cameraSource) }
+            Text("Camera for \"what am I looking at?\"", style = MaterialTheme.typography.bodyMedium)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf("auto" to "Auto", "glasses" to "Glasses", "phone" to "Phone").forEach { (id, label) ->
+                    FilterChip(selected = camera == id, onClick = {
+                        camera = id; config.cameraSource = id
+                        AssistantService.cameraChanged(context)
+                    }, label = { Text(label) })
+                }
+            }
+            Text(when (camera) {
+                "phone" -> "Uses the phone's back camera. Point the phone at what you want it to see."
+                "glasses" -> "Uses only the glasses camera."
+                else -> "Uses the glasses camera, or the phone's back camera when the glasses camera isn't working."
+            }, style = MaterialTheme.typography.bodySmall)
             Text(if (media) "✓ Music access: sees and controls what's playing" else
                 "Music access lets it show and control what's playing (Spotify, YouTube…).",
                 style = MaterialTheme.typography.bodyMedium)
@@ -228,6 +243,7 @@ private fun HomeScreen(skinId: String, onSkin: (String) -> Unit) {
 
     val needed = buildList {
         add(Manifest.permission.RECORD_AUDIO)
+        add(Manifest.permission.CAMERA)   // the phone camera, while the glasses camera is out
         if (Build.VERSION.SDK_INT >= 33) add(Manifest.permission.POST_NOTIFICATIONS)
     }
     val permissions = rememberLauncherForActivityResult(

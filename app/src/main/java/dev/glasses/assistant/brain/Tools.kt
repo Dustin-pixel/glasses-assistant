@@ -58,14 +58,16 @@ fun schema(props: Map<String, Pair<String, String>> = emptyMap(), required: List
 
 // ---------------------------------------------------------------- built-in tools
 
-class LookTool(private val link: GlassesLink) : Tool {
+/** Where a photo came from, and the photo. */
+class Photo(val jpeg: ByteArray, val note: String)
+
+class LookTool(private val take: suspend () -> Photo) : Tool {
     override val name = "look"
     override val description =
-        "Capture a photo from the camera on the user's glasses, showing what they are looking at. " +
-            "Use whenever the user refers to something they see (this, that, here, what am I looking at)."
+        "Take a photo of what the user is looking at, with the glasses camera (or the phone's camera while " +
+            "testing). Use whenever the user refers to something they see (this, that, here, what am I looking at)."
     override val inputSchema = schema()
-    override suspend fun run(input: JSONObject): ToolResult =
-        ToolResult.Image(link.captureFrame(), "Photo from the glasses camera, just now.")
+    override suspend fun run(input: JSONObject): ToolResult = take().let { ToolResult.Image(it.jpeg, it.note) }
 }
 
 class ShowOnDisplayTool(private val link: GlassesLink) : Tool {
