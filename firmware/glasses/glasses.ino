@@ -177,7 +177,11 @@ void compose() {
     } else if (!linked) {
       drawText(screen, statusLine, "center", false);
     } else {
-      screen->fillCircle(SIZE / 2, SIZE / 2, 5, cAccent);   // ready
+      screen->fillCircle(SIZE / 2, SIZE / 2, 22, cAccent);   // ready
+      screen->setFont(&FreeSans9pt7b);
+      screen->setTextColor(cText);
+      screen->setCursor(SIZE / 2 - textWidth(screen, "Ready") / 2, 172);
+      screen->print("Ready");
     }
   }
   tft.drawRGBBitmap(0, 0, screen->getBuffer(), SIZE, SIZE);
@@ -496,7 +500,7 @@ img{max-width:min(92vw,480px);border-radius:10px}</style>
 <div class=lens><canvas id=c width=240 height=240></canvas></div>
 <div class=row><button onclick="press('short')">Press · talk</button><button onclick="press('double')">Double · switch display</button>
 <button onclick="press('long')">Hold · hush</button></div>
-<div class=row><button onclick="photo()">Take a photo</button><button onclick="retry()">Retry camera</button></div>
+<div class=row><button onclick="photo()">Take a photo</button><button onclick="retry()">Retry camera</button><button onclick="dtest()">Test real screen</button></div>
 <div id=st>Connecting…</div><div id=cam></div><img id=ph hidden>
 <script>
 const c=document.getElementById('c').getContext('2d'),img=c.createImageData(240,240);let v=0;
@@ -513,6 +517,7 @@ const cam=document.getElementById('cam');cam.style.cssText='max-width:420px;text
 async function photo(){const p=document.getElementById('ph');cam.textContent='Taking a photo…';try{const r=await fetch('/photo?t='+Date.now());
 if(!r.ok){cam.textContent='Photo failed: '+await r.text();p.hidden=true;return}p.src=URL.createObjectURL(await r.blob());p.hidden=false;cam.textContent=''}
 catch(e){cam.textContent='Photo failed: lost contact'}}
+async function dtest(){try{cam.style.color='#9aa0a6';cam.textContent=await (await fetch('/display/test')).text()}catch(e){cam.textContent='Lost contact'}}
 async function retry(){cam.textContent='Restarting the camera…';try{cam.textContent=await (await fetch('/camera/retry')).text()}catch(e){cam.textContent='Lost contact'}}
 frame();status();
 </script>)HTML";
@@ -542,6 +547,11 @@ void startVirtualDisplay() {
     web.send_P(200, "image/jpeg", (const char *)fb->buf, fb->len);
     esp_camera_fb_return(fb);
   });
+  web.on("/display/test", []() {
+    web.send(200, "text/plain", "Showing red, green, blue and white on the real screen now.");
+    displayTest();
+    compose();
+  });
   web.on("/camera/retry", []() {
     startCamera();
     web.send(200, "text/plain", cameraOk ? "Camera working: " + cameraModel : "Camera failed: " + cameraError);
@@ -561,13 +571,27 @@ void startVirtualDisplay() {
 
 // ---------------------------------------------------------------- main
 
+/** Full-screen colors and big text, so a working screen is obvious at power-up. */
+void displayTest() {
+  const uint16_t colors[] = {GC9A01A_RED, GC9A01A_GREEN, GC9A01A_BLUE, GC9A01A_WHITE};
+  for (uint16_t c : colors) { tft.fillScreen(c); delay(350); }
+  tft.fillScreen(GC9A01A_BLACK);
+  tft.setFont(&FreeSans9pt7b);
+  tft.setTextColor(GC9A01A_WHITE);
+  tft.setTextSize(2);
+  tft.setCursor(40, 115); tft.print("Screen");
+  tft.setCursor(70, 155); tft.print("OK");
+  tft.setTextSize(1);
+  delay(900);
+}
+
 void setup() {
   Serial.begin(115200);
   Serial.printf("Glasses firmware %s, restart reason %d\n", FW_VERSION, (int)esp_reset_reason());
   pinMode(BUTTON_BOOT, INPUT_PULLUP);
   pinMode(BUTTON_EXT, INPUT_PULLUP);
 
-  tft.begin(40000000);
+  tft.begin(24000000);   // 24 MHz: reliable over hand-soldered wires
   tft.setRotation(0);
   screen = new GFXcanvas16(SIZE, SIZE);
   frame = new GFXcanvas16(SIZE, SIZE);
@@ -576,6 +600,7 @@ void setup() {
     while (true) delay(1000);
   }
   frame->fillScreen(0);
+  displayTest();
   TJpgDec.setJpgScale(1);
   TJpgDec.setSwapBytes(false);
   TJpgDec.setCallback(onJpegBlock);

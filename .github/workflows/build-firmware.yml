@@ -41,6 +41,11 @@ jobs:
           arduino-cli compile --fqbn esp32:esp32:XIAO_ESP32S3:PSRAM=opi --output-dir out-camtest firmware/camera_test
           cp out-camtest/camera_test.ino.merged.bin camera-test.bin
 
+      - name: Compile the screen test
+        run: |
+          arduino-cli compile --fqbn esp32:esp32:XIAO_ESP32S3:PSRAM=opi --output-dir out-disptest firmware/display_test
+          cp out-disptest/display_test.ino.merged.bin screen-test.bin
+
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
@@ -55,7 +60,9 @@ jobs:
 
             camera-test.bin only tests the camera (flash it the same way). The orange light next to the USB port:
             steady on = camera working, fast blinking = camera not found, slow blinking = found but no picture.
+            screen-test.bin only tests the round screen: it cycles red, green, blue, white, then "Screen OK".
             Flash the glasses firmware again afterwards.
           files: |
             glasses-firmware-${{ github.run_number }}.bin
             camera-test.bin
+            screen-test.bin
