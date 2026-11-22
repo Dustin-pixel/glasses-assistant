@@ -8,6 +8,7 @@ sealed interface HandAction {
     data object NextTrack : HandAction
     data object PreviousTrack : HandAction
     data object PlayPause : HandAction
+    data object Call : HandAction
     data object NextDisplay : HandAction
     data class Zoom(val factor: Float) : HandAction          // multiply the current zoom
     data class Turn(val dYaw: Float, val dPitch: Float) : HandAction
@@ -20,19 +21,19 @@ class HandFrame(val gesture: String, val score: Float, val x: FloatArray, val y:
  * Turns a stream of hand frames into actions. Plain Kotlin, so it can be tested without a phone.
  * Frames must be from the user's point of view (front camera mirrored), so "right" is their right.
  *
- *   ✌  peace sign, held about half a second   -> next display mode
- *   👍 thumbs up, held about half a second    -> play / pause
- *   🖐 open hand, swiped right or left         -> next or previous track
- *   🤏 thumb and index out, other fingers down -> zoom: spread them to zoom in, close to zoom out
- *   ✊ fist, moved around                      -> turn the 3D model
+ *   ✌  peace sign, held about half a second     -> next display mode
+ *   👍 thumbs up, held                           -> play / pause
+ *   👉 thumb pointing right (your right), held   -> next track
+ *   👈 thumb pointing left, held                 -> previous track
+ *   🤙 thumb and little finger out, held         -> make a call
+ *   🤏 thumb and index out, other fingers down   -> zoom: spread them to zoom in, close to zoom out
+ *   ✊ fist, moved around                        -> turn the 3D model
  */
 class GestureEngine {
     private var holdName = ""
     private var holdSince = 0L
     private var holdFired = false
 
-    private val palm = ArrayDeque<Pair<Long, Float>>()   // (time, wrist x) while the hand is open
-    private var swipeQuietUntil = 0L
 
     private var pinchBase = 0f
     private var pinchLast = 0f
@@ -46,14 +47,18 @@ class GestureEngine {
 
     fun noHand() {
         holdName = ""; holdFired = false
-        palm.clear(); pinchBase = 0f; fistX = Float.NaN
+        pinchBase = 0f; fistX = Float.NaN
         lastSeen = "no hand"
     }
 
     fun feed(f: HandFrame): List<HandAction> {
         val out = mutableListOf<HandAction>()
         val pinchPose = isPinchPose(f)
-        val name = if (pinchPose) "Pinch" else f.gesture
+        val name = when {
+            pinchPose -> "Pinch"
+            isCallPose(f) -> "Call"
+            else -> thumbSideways(f) ?: f.gesture
+        }
         lastSeen = name
 
         // Held gestures: fire once per hold.
@@ -63,22 +68,11 @@ class GestureEngine {
             when (name) {
                 "Victory" -> { out += HandAction.NextDisplay; holdFired = true }
                 "Thumb_Up" -> { out += HandAction.PlayPause; holdFired = true }
+                "Thumb_Right" -> { out += HandAction.NextTrack; holdFired = true }
+                "Thumb_Left" -> { out += HandAction.PreviousTrack; holdFired = true }
+                "Call" -> { out += HandAction.Call; holdFired = true }
             }
         }
-
-        // Swipes with an open hand.
-        if (name == "Open_Palm") {
-            palm.addLast(f.timeMs to f.x[WRIST])
-            while (palm.isNotEmpty() && f.timeMs - palm.first().first > SWIPE_WINDOW_MS) palm.removeFirst()
-            if (f.timeMs >= swipeQuietUntil && palm.size >= 3) {
-                val dx = palm.last().second - palm.first().second
-                if (abs(dx) >= SWIPE_DISTANCE) {
-                    out += if (dx > 0) HandAction.NextTrack else HandAction.PreviousTrack
-                    swipeQuietUntil = f.timeMs + SWIPE_COOLDOWN_MS
-                    palm.clear()
-                }
-            }
-        } else palm.clear()
 
         // Pinch to zoom: compare the thumb-index spread to where it was when the pose began.
         if (pinchPose) {
@@ -114,6 +108,31 @@ class GestureEngine {
 
     private fun extended(f: HandFrame, tip: Int, pip: Int) = dist(f, WRIST, tip) > dist(f, WRIST, pip) * 1.15f
 
+    private fun handSize(f: HandFrame) = dist(f, WRIST, MIDDLE_MCP).coerceAtLeast(1e-3f)
+
+    /** The thumb sticks out from the hand (not folded across a fist). */
+    private fun thumbOut(f: HandFrame) =
+        dist(f, THUMB_TIP, MIDDLE_MCP) > dist(f, THUMB_IP, MIDDLE_MCP) * 1.05f &&
+            dist(f, THUMB_TIP, INDEX_MCP) > handSize(f) * 0.55f
+
+    private fun fingersFolded(f: HandFrame) =
+        !extended(f, INDEX_TIP, INDEX_PIP) && !extended(f, MIDDLE_TIP, MIDDLE_PIP) &&
+            !extended(f, RING_TIP, RING_PIP) && !extended(f, PINKY_TIP, PINKY_PIP)
+
+    /** "Thumb_Right" / "Thumb_Left" when the fist is closed and the thumb points sideways, else null. */
+    private fun thumbSideways(f: HandFrame): String? {
+        if (f.x.size < 21 || !fingersFolded(f) || !thumbOut(f)) return null
+        val dx = f.x[THUMB_TIP] - f.x[THUMB_MCP]
+        val dy = f.y[THUMB_TIP] - f.y[THUMB_MCP]
+        if (abs(dx) < abs(dy) * 1.3f) return null
+        return if (dx > 0) "Thumb_Right" else "Thumb_Left"
+    }
+
+    /** 🤙 Thumb and little finger out; index, middle and ring folded. */
+    private fun isCallPose(f: HandFrame): Boolean =
+        f.x.size >= 21 && thumbOut(f) && extended(f, PINKY_TIP, PINKY_PIP) &&
+            !extended(f, INDEX_TIP, INDEX_PIP) && !extended(f, MIDDLE_TIP, MIDDLE_PIP) && !extended(f, RING_TIP, RING_PIP)
+
     /** Index finger out; middle, ring and little fingers folded. */
     private fun isPinchPose(f: HandFrame): Boolean =
         f.x.size >= 21 && extended(f, INDEX_TIP, INDEX_PIP) &&
@@ -123,16 +142,14 @@ class GestureEngine {
 
     companion object {
         const val WRIST = 0
-        const val THUMB_TIP = 4
+        const val THUMB_MCP = 2; const val THUMB_IP = 3; const val THUMB_TIP = 4
+        const val INDEX_MCP = 5
         const val INDEX_PIP = 6; const val INDEX_TIP = 8
         const val MIDDLE_MCP = 9; const val MIDDLE_PIP = 10; const val MIDDLE_TIP = 12
         const val RING_PIP = 14; const val RING_TIP = 16
         const val PINKY_PIP = 18; const val PINKY_TIP = 20
 
         const val HOLD_MS = 500L
-        const val SWIPE_WINDOW_MS = 450L
-        const val SWIPE_DISTANCE = 0.22f
-        const val SWIPE_COOLDOWN_MS = 900L
         const val ZOOM_STEP = 0.06f
     }
 }

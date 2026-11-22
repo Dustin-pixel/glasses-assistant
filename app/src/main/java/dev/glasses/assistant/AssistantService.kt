@@ -142,6 +142,7 @@ class AssistantService : Service() {
                 dev.glasses.assistant.brain.LookAtModelTool(modelView),
                 mediaTool,
                 HandControlsTool(),
+                dev.glasses.assistant.brain.CallTool(this),
                 OpenAppTool(this),
                 GestureTool(),
                 ReadScreenTool(),
@@ -274,6 +275,28 @@ class AssistantService : Service() {
         setPhase(Phase.Speaking)
         link.send(Protocol.overlay(reply, ttlMs = 6000L + reply.length * 50L))
         say(reply)
+    }
+
+    /** The 🤙 gesture: ask who to call, listen, and let the assistant place the call. */
+    private fun callTurn() {
+        turn?.cancel()
+        turn = scope.launch {
+            try {
+                link.send(Protocol.overlay("Who should I call?", ttlMs = 8000))
+                setPhase(Phase.Speaking)
+                say("Who should I call?")
+                setPhase(Phase.Listening)
+                val heard = speechIn.listen()?.trim()
+                if (heard.isNullOrEmpty()) { link.send(Protocol.clear()); return@launch }
+                respond("Call $heard")
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _state.update { it.copy(error = e.message) }
+            } finally {
+                setPhase(Phase.Idle)
+            }
+        }
     }
 
     /** Text that arrived already transcribed (e.g. "Hey Google, play … on Glasses Assistant" in the car). */
@@ -444,6 +467,7 @@ class AssistantService : Service() {
     private suspend fun onHand(actions: List<dev.glasses.assistant.hands.HandAction>) {
         for (a in actions) when (a) {
             dev.glasses.assistant.hands.HandAction.NextDisplay -> cycleDisplay()
+            dev.glasses.assistant.hands.HandAction.Call -> callTurn()
             dev.glasses.assistant.hands.HandAction.NextTrack -> {
                 link.send(Protocol.overlay("Next track", ttlMs = 1200))
                 mediaTool.run(org.json.JSONObject().put("action", "next"))
@@ -473,7 +497,8 @@ class AssistantService : Service() {
         override val name = "hand_controls"
         override val description =
             "Turn hand-gesture controls on or off. Gestures (seen by the phone's front camera for now): peace sign " +
-                "held = next display mode, thumbs up held = play/pause, open hand swiped right/left = next/previous " +
+                "held = next display mode, thumbs up held = play/pause, thumb pointing right/left held = next/previous " +
+                "track, thumb and little finger out (call sign) held = make a call, " +
                 "track, thumb and index spread/closed = zoom, fist moved = turn the 3D model."
         override val inputSchema = org.json.JSONObject()
             .put("type", "object")

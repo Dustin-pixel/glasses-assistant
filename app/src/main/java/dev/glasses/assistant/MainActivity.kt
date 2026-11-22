@@ -147,6 +147,9 @@ private fun HandsCard(config: Config) {
                     "Thumb_Up" -> "👍 thumbs up"
                     "Thumb_Down" -> "👎 thumbs down"
                     "Open_Palm" -> "🖐 open hand"
+                    "Thumb_Right" -> "👉 thumb pointing right"
+                    "Thumb_Left" -> "👈 thumb pointing left"
+                    "Call" -> "🤙 call sign"
                     "Closed_Fist" -> "✊ fist"
                     "Pointing_Up" -> "☝ pointing up"
                     "ILoveYou" -> "🤟"
@@ -160,7 +163,9 @@ private fun HandsCard(config: Config) {
                     "When the camera view is on, the back camera does instead.\n" +
                     "✌ Peace sign, hold: next display mode\n" +
                     "👍 Thumbs up, hold: play or pause\n" +
-                    "🖐 Open hand, swipe right or left: next or previous track\n" +
+                    "👉 Thumb pointing right, hold: next track\n" +
+                    "👈 Thumb pointing left, hold: previous track\n" +
+                    "🤙 Thumb and little finger out, hold: make a call\n" +
                     "🤏 Thumb and index out, other fingers down: spread to zoom in, close to zoom out\n" +
                     "✊ Fist, move it: turn the 3D model",
                 style = MaterialTheme.typography.bodySmall,
@@ -332,6 +337,8 @@ private fun HomeScreen(skinId: String, onSkin: (String) -> Unit) {
     val needed = buildList {
         add(Manifest.permission.RECORD_AUDIO)
         add(Manifest.permission.CAMERA)   // the phone camera, while the glasses camera is out
+        add(Manifest.permission.READ_CONTACTS)   // "call Mom"
+        add(Manifest.permission.CALL_PHONE)
         if (Build.VERSION.SDK_INT >= 33) add(Manifest.permission.POST_NOTIFICATIONS)
     }
     val permissions = rememberLauncherForActivityResult(
