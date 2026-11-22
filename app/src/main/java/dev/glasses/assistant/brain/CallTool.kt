@@ -50,8 +50,9 @@ class CallTool(private val context: Context) : Tool {
     }
 
     private fun call(number: String, label: String): String {
-        if (!granted(Manifest.permission.CALL_PHONE)) return
-            "The app isn't allowed to make calls. Tell the user to allow Phone: stop and start the assistant in the app."
+        if (!granted(Manifest.permission.CALL_PHONE)) {
+            return "The app isn't allowed to make calls. Tell the user to allow Phone: stop and start the assistant in the app."
+        }
         return try {
             context.getSystemService(TelecomManager::class.java)
                 .placeCall(Uri.fromParts("tel", number, null), Bundle())
