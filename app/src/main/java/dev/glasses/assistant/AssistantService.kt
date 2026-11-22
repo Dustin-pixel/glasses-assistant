@@ -70,6 +70,7 @@ data class AssistantState(
     val error: String? = null,
     val debate: List<DebateLine> = emptyList(),
     val voice: String = "",                // which voice is speaking, and why
+    val hands: String = "off",             // hand tracking: off, no hand, or the gesture it sees
     val display: Source = Source.None,     // what's streaming to the glasses display
     val mirrorAllowed: Boolean = false,    // screen capture granted for this session
     val glassesIp: String? = null,         // the glasses' own address (virtual display page)
@@ -108,20 +109,39 @@ class AssistantService : Service() {
         nowPlaying = NowPlayingCard(this, screen) { config.skin }
         textCard = TextCard(screen) { config.skin }
         cameraView = CameraView(this, screen)
+        models = dev.glasses.assistant.model3d.ModelLibrary(this)
+        modelView = dev.glasses.assistant.display.ModelView(screen) { config.skin }
         scope.launch {
             screen.source.collect { s ->
                 _state.update { it.copy(display = s) }
                 // The camera runs only while its view is showing (also when a text card hands back to it).
-                if (s == Source.Camera) onMain { startCameraView() } else onMain { cameraView.stop() }
+                // Hand tracking then reads the camera view's pictures instead of using the front camera.
+                if (s == Source.Camera) onMain {
+                    hands.releaseCamera()
+                    cameraView.onUpright = { hands.feedExternal(it) }
+                    startCameraView()
+                } else onMain {
+                    cameraView.stop()
+                    cameraView.onUpright = null
+                    hands.reclaimCamera()
+                }
             }
         }
+        hands = dev.glasses.assistant.hands.HandTracker(this) { actions -> scope.launch { onHand(actions) } }
+        scope.launch { hands.status.collect { st -> _state.update { it.copy(hands = st) } } }
+        if (config.handControls) onMain { startHands() }
 
         val tools = ToolRegistry(
             listOf(
                 LookTool(::takePhoto),
                 ShowOnDisplayTool(link),
                 ShowScreenTool(displayControl),
-                MediaTool(this),
+                dev.glasses.assistant.brain.CreateModelTool(models, modelView, scope),
+                dev.glasses.assistant.brain.OpenModelTool(models, modelView, scope),
+                dev.glasses.assistant.brain.ModelViewTool(modelView),
+                dev.glasses.assistant.brain.LookAtModelTool(modelView),
+                mediaTool,
+                HandControlsTool(),
                 OpenAppTool(this),
                 GestureTool(),
                 ReadScreenTool(),
@@ -150,6 +170,11 @@ class AssistantService : Service() {
             ACTION_CLEAR -> { turn?.cancel(); _state.update { it.copy(debate = emptyList()) } }
             ACTION_STOP -> stopSelf()
             ACTION_VOICES -> loadNeuralVoice()
+            ACTION_HANDS -> if (config.handControls) startHands() else hands.stop()
+            ACTION_OPEN_MODEL -> intent.getStringExtra(EXTRA_MODE)?.let { name ->
+                runCatching { models.load(name) }.onSuccess { modelView.show(scope, it) }
+                    .onFailure { e -> _state.update { it.copy(error = e.message) } }
+            }
             // From the app while it's on screen: the moment Android allows becoming a camera service.
             ACTION_CAMERA -> runCatching { startInForeground(withCapture = mirror?.running == true) }
             ACTION_TEST_VOICE -> {
@@ -168,6 +193,7 @@ class AssistantService : Service() {
             ACTION_DISPLAY -> when (intent.getStringExtra(EXTRA_MODE)) {
                 "now_playing" -> displayControl.showNowPlaying()
                 "camera" -> displayControl.showCamera()
+                "model" -> displayControl.showModel()
                 "mirror" -> displayControl.showMirror(Crop.Auto, null, null)
                 else -> displayControl.showOff()
             }
@@ -398,6 +424,73 @@ class AssistantService : Service() {
     private var mirrorWanted: Triple<Crop, Float?, Float?>? = null
 
     private lateinit var cameraView: CameraView
+    private lateinit var hands: dev.glasses.assistant.hands.HandTracker
+    private val mediaTool by lazy { MediaTool(this) }
+
+    // ---------------------------------------------------------------- hand controls
+
+    private fun startHands() {
+        if (!phoneCamera.hasPermission()) {
+            _state.update { it.copy(error = "Hand controls need camera permission. Stop and start the assistant to allow it.") }
+            return
+        }
+        hands.start { problem -> _state.update { it.copy(error = "Hand controls: $problem") } }
+        if (screen.source.value == Source.Camera) {   // the camera view already has the camera
+            hands.releaseCamera()
+            cameraView.onUpright = { hands.feedExternal(it) }
+        }
+    }
+
+    private suspend fun onHand(actions: List<dev.glasses.assistant.hands.HandAction>) {
+        for (a in actions) when (a) {
+            dev.glasses.assistant.hands.HandAction.NextDisplay -> cycleDisplay()
+            dev.glasses.assistant.hands.HandAction.NextTrack -> {
+                link.send(Protocol.overlay("Next track", ttlMs = 1200))
+                mediaTool.run(org.json.JSONObject().put("action", "next"))
+            }
+            dev.glasses.assistant.hands.HandAction.PreviousTrack -> {
+                link.send(Protocol.overlay("Previous track", ttlMs = 1200))
+                mediaTool.run(org.json.JSONObject().put("action", "previous"))
+            }
+            dev.glasses.assistant.hands.HandAction.PlayPause -> {
+                val playing = dev.glasses.assistant.display.Media.current(this)?.playbackState?.state ==
+                    android.media.session.PlaybackState.STATE_PLAYING
+                link.send(Protocol.overlay(if (playing) "Pause" else "Play", ttlMs = 1200))
+                mediaTool.run(org.json.JSONObject().put("action", if (playing) "pause" else "play"))
+            }
+            is dev.glasses.assistant.hands.HandAction.Zoom -> when (screen.source.value) {
+                Source.Model -> modelView.zoomBy(a.factor)
+                Source.Camera -> cameraView.zoomBy(a.factor)
+                else -> {}
+            }
+            is dev.glasses.assistant.hands.HandAction.Turn ->
+                if (screen.source.value == Source.Model) modelView.rotateBy(a.dYaw, a.dPitch)
+        }
+    }
+
+    /** Lets the assistant switch hand controls on and off by voice. */
+    private inner class HandControlsTool : dev.glasses.assistant.brain.Tool {
+        override val name = "hand_controls"
+        override val description =
+            "Turn hand-gesture controls on or off. Gestures (seen by the phone's front camera for now): peace sign " +
+                "held = next display mode, thumbs up held = play/pause, open hand swiped right/left = next/previous " +
+                "track, thumb and index spread/closed = zoom, fist moved = turn the 3D model."
+        override val inputSchema = org.json.JSONObject()
+            .put("type", "object")
+            .put("properties", org.json.JSONObject().put("on", org.json.JSONObject().put("type", "boolean")))
+            .put("required", org.json.JSONArray(listOf("on")))
+
+        override suspend fun run(input: org.json.JSONObject): dev.glasses.assistant.brain.ToolResult {
+            val on = input.getBoolean("on")
+            config.handControls = on
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) { if (on) startHands() else hands.stop() }
+            return dev.glasses.assistant.brain.ToolResult.Text(if (on) "Hand controls on." else "Hand controls off.")
+        }
+    }
+    lateinit var models: dev.glasses.assistant.model3d.ModelLibrary
+        private set
+    lateinit var modelView: dev.glasses.assistant.display.ModelView
+        private set
 
     private fun startCameraView() {
         if (cameraView.running || screen.source.value != Source.Camera) return
@@ -419,6 +512,14 @@ class AssistantService : Service() {
             textCard.stop()
             screen.setSource(Source.Camera)   // the source watcher starts the camera
             return "Showing the phone's back camera on the glasses."
+        }
+
+        override fun showModel(): String {
+            textCard.stop()
+            val m = modelView.model ?: runCatching { models.load("eyepiece") }.getOrNull()
+                ?: return "No models yet."
+            modelView.show(scope, m)
+            return "Showing the 3D model \"${m.name}\"."
         }
 
         override fun showNowPlaying(): String {
@@ -463,11 +564,13 @@ class AssistantService : Service() {
         when (screen.source.value) {
             Source.None -> displayControl.showCamera()
             Source.Camera -> displayControl.showNowPlaying()
-            Source.NowPlaying -> displayControl.showMirror(Crop.Auto, null, null)
+            Source.NowPlaying -> displayControl.showModel()
+            Source.Model -> displayControl.showMirror(Crop.Auto, null, null)
             else -> displayControl.showOff()
         }
         link.send(Protocol.overlay(when (screen.source.value) {
-            Source.Camera -> "Camera"; Source.NowPlaying -> "Now playing"; Source.Mirror -> "Screen"; else -> "Display off"
+            Source.Camera -> "Camera"; Source.NowPlaying -> "Now playing"; Source.Model -> "3D model"
+            Source.Mirror -> "Screen"; else -> "Display off"
         }, ttlMs = 1200))
     }
 
@@ -476,6 +579,7 @@ class AssistantService : Service() {
         when (screen.source.value) {
             Source.NowPlaying -> nowPlaying.start(scope)
             Source.Mirror -> mirror?.refresh()
+            Source.Model -> modelView.start(scope)
             else -> {}   // the camera view sends a fresh picture every moment anyway
         }
     }
@@ -559,7 +663,15 @@ class AssistantService : Service() {
             Log.i(TAG, "Glasses camera unavailable ($glassesProblem); using the phone camera")
         }
         // While the camera view is on, use its latest picture rather than opening the camera twice.
-        val jpeg = cameraView.snapshot() ?: phoneCamera.capture()
+        val jpeg = cameraView.snapshot() ?: run {
+            // The front camera may be busy with hand tracking; most phones open one camera at a time.
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) { hands.releaseCamera() }
+            try { phoneCamera.capture() } finally {
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                    if (screen.source.value != Source.Camera) hands.reclaimCamera()
+                }
+            }
+        }
         return dev.glasses.assistant.brain.Photo(jpeg,
             "Photo from the PHONE's back camera just now (the glasses camera isn't being used), " +
                 "so it shows wherever the phone is pointed.")
@@ -612,6 +724,7 @@ class AssistantService : Service() {
     }
 
     override fun onDestroy() {
+        runCatching { hands.stop() }
         mirror?.stop()
         mirror = null
         scope.cancel()
@@ -645,6 +758,8 @@ class AssistantService : Service() {
         const val ACTION_SKIN = "dev.glasses.assistant.SKIN"
         const val ACTION_VOICES = "dev.glasses.assistant.VOICES"
         const val ACTION_CAMERA = "dev.glasses.assistant.CAMERA"
+        const val ACTION_HANDS = "dev.glasses.assistant.HANDS"
+        const val ACTION_OPEN_MODEL = "dev.glasses.assistant.OPEN_MODEL"
         const val ACTION_TEST_VOICE = "dev.glasses.assistant.TEST_VOICE"
         const val ACTION_CONTINUE = "dev.glasses.assistant.CONTINUE"
         const val ACTION_CLEAR = "dev.glasses.assistant.CLEAR"
@@ -684,6 +799,15 @@ class AssistantService : Service() {
             context.startService(Intent(context, AssistantService::class.java).setAction(ACTION_CLEAR))
 
         /** Tell a running service the voice pack was installed, so it loads the neural voice. */
+        fun handsChanged(context: Context) {
+            if (state.value.running) context.startService(Intent(context, AssistantService::class.java).setAction(ACTION_HANDS))
+        }
+
+        fun openModel(context: Context, name: String) {
+            if (state.value.running) context.startService(
+                Intent(context, AssistantService::class.java).setAction(ACTION_OPEN_MODEL).putExtra(EXTRA_MODE, name))
+        }
+
         fun cameraChanged(context: Context) {
             if (state.value.running) {
                 context.startService(Intent(context, AssistantService::class.java).setAction(ACTION_CAMERA))

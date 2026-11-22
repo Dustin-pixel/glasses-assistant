@@ -87,6 +87,88 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+/** 3D models: open a built-in, saved or imported model, or import an STL file. */
+@Composable
+private fun ModelsCard() {
+    val context = LocalContext.current
+    val state by AssistantService.state.collectAsStateWithLifecycle()
+    val library = remember { dev.glasses.assistant.model3d.ModelLibrary(context) }
+    var names by remember { mutableStateOf(library.list()) }
+    var message by remember { mutableStateOf<String?>(null) }
+    val pick = rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        val display = context.contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)
+            ?.use { c -> if (c.moveToFirst()) c.getString(0) else null }
+        message = runCatching { library.import(uri, display) }.fold(
+            onSuccess = { m ->
+                names = library.list()
+                AssistantService.openModel(context, m.name)
+                "Imported ${m.name}: ${m.mesh.sizeText()}" + if (state.running) "" else ". Start the assistant to see it."
+            },
+            onFailure = { "Couldn't open that file: ${it.message}" },
+        )
+    }
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("3D models", style = MaterialTheme.typography.titleMedium)
+            Text("Ask the assistant to make one (\"design a phone stand\"), or open one here. Pinch with your " +
+                "fingers to zoom and move a fist to turn it, with hand controls on.", style = MaterialTheme.typography.bodySmall)
+            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                names.forEach { n ->
+                    FilterChip(selected = false, enabled = state.running, onClick = { AssistantService.openModel(context, n) },
+                        label = { Text(n.replace('_', ' ')) })
+                }
+            }
+            OutlinedButton(onClick = { pick.launch(arrayOf("*/*")) }) { Text("Open an STL file") }
+            message?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+        }
+    }
+}
+
+/** Hand gestures, with what the camera currently sees. */
+@Composable
+private fun HandsCard(config: Config) {
+    val context = LocalContext.current
+    val state by AssistantService.state.collectAsStateWithLifecycle()
+    var on by remember { mutableStateOf(config.handControls) }
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Hand controls", style = MaterialTheme.typography.titleMedium)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Switch(checked = on, onCheckedChange = { on = it; config.handControls = it; AssistantService.handsChanged(context) })
+                Text("Use hand gestures", Modifier.padding(start = 12.dp))
+            }
+            if (on && state.running) Text(
+                "I can see: " + when (state.hands) {
+                    "off" -> "nothing yet (starting)"
+                    "starting" -> "starting the camera…"
+                    "no hand" -> "no hand"
+                    "Victory" -> "✌ peace sign"
+                    "Thumb_Up" -> "👍 thumbs up"
+                    "Thumb_Down" -> "👎 thumbs down"
+                    "Open_Palm" -> "🖐 open hand"
+                    "Closed_Fist" -> "✊ fist"
+                    "Pointing_Up" -> "☝ pointing up"
+                    "ILoveYou" -> "🤟"
+                    "Pinch" -> "🤏 pinch (zoom)"
+                    else -> "a hand"
+                },
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            Text(
+                "For now the phone's front camera watches your hand, about 30–60 cm away. " +
+                    "When the camera view is on, the back camera does instead.\n" +
+                    "✌ Peace sign, hold: next display mode\n" +
+                    "👍 Thumbs up, hold: play or pause\n" +
+                    "🖐 Open hand, swipe right or left: next or previous track\n" +
+                    "🤏 Thumb and index out, other fingers down: spread to zoom in, close to zoom out\n" +
+                    "✊ Fist, move it: turn the 3D model",
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
+    }
+}
+
 /** What the glasses display shows, with a live round preview of what's being sent. */
 @Composable
 private fun DisplayCard() {
@@ -96,8 +178,9 @@ private fun DisplayCard() {
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("Glasses display", style = MaterialTheme.typography.titleMedium)
-            Text("Or just ask: \"show what's playing\", \"put my screen on the glasses\", \"stop showing that\". " +
-                "Double-press the glasses button to switch: camera, now playing, screen, normal.", style = MaterialTheme.typography.bodySmall)
+            Text("Or just ask: \"show what's playing\", \"make me a 3D model of a desk lamp\", \"stop showing that\". " +
+                "Double-press the glasses button, or hold up a peace sign, to switch: camera, now playing, 3D model, screen, normal.",
+                style = MaterialTheme.typography.bodySmall)
             if (state.running) {
                 Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     FilterChip(selected = state.display == Source.None, onClick = { AssistantService.display(context, "off") },
@@ -106,6 +189,8 @@ private fun DisplayCard() {
                         label = { Text("Camera") })
                     FilterChip(selected = state.display == Source.NowPlaying, onClick = { AssistantService.display(context, "now_playing") },
                         label = { Text("Now playing") })
+                    FilterChip(selected = state.display == Source.Model, onClick = { AssistantService.display(context, "model") },
+                        label = { Text("3D model") })
                     FilterChip(selected = state.display == Source.Mirror, onClick = { AssistantService.display(context, "mirror") },
                         label = { Text("Screen") })
                 }
@@ -317,6 +402,8 @@ private fun HomeScreen(skinId: String, onSkin: (String) -> Unit) {
         )
 
         DisplayCard()
+        ModelsCard()
+        HandsCard(config)
         PhoneCard(config)
         VoicesCard(config)
 

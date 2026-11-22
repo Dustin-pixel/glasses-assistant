@@ -20,6 +20,7 @@ import org.json.JSONObject
 interface DisplayControl {
     fun showNowPlaying(): String
     fun showCamera(): String
+    fun showModel(): String
     fun showMirror(crop: Crop, zoom: Float?, pan: Float?): String
     fun showText(title: String, text: String): String
     fun showOff(): String

@@ -36,6 +36,11 @@ class Config(context: Context) {
         get() = prefs.getString(KEY_CAMERA, "auto") ?: "auto"
         set(value) = prefs.edit().putString(KEY_CAMERA, value).apply()
 
+    /** Hand gestures through the phone's front camera (or the camera view). */
+    var handControls: Boolean
+        get() = prefs.getBoolean(KEY_HANDS, false)
+        set(value) = prefs.edit().putBoolean(KEY_HANDS, value).apply()
+
     /** Let the assistant search the web (Claude's web search tool, about $10 per 1,000 searches). */
     var webSearch: Boolean
         get() = prefs.getBoolean(KEY_SEARCH, true)
@@ -58,5 +63,6 @@ class Config(context: Context) {
         private const val KEY_NEURAL = "neural_voices"
         private const val KEY_SEARCH = "web_search"
         private const val KEY_CAMERA = "camera_source"
+        private const val KEY_HANDS = "hand_controls"
     }
 }

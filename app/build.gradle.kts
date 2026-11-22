@@ -33,6 +33,9 @@ android {
 
     buildFeatures { compose = true }
 
+    // MediaPipe reads its model straight from the APK, which needs it stored uncompressed.
+    androidResources { noCompress += "task" }
+
     packaging {
         // The Apache Commons jars each carry their own licence files.
         resources { excludes += setOf("META-INF/DEPENDENCIES", "META-INF/LICENSE*", "META-INF/NOTICE*") }
@@ -54,7 +57,8 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
     implementation("androidx.media:media:1.7.0")
     implementation("androidx.camera:camera-camera2:1.4.1")       // phone camera stand-in for "look"
-    implementation("androidx.camera:camera-lifecycle:1.4.1")                  // Android Auto (media app)
+    implementation("androidx.camera:camera-lifecycle:1.4.1")
+    implementation("com.google.mediapipe:tasks-vision:0.10.14")   // hand tracking (gesture recognizer)                  // Android Auto (media app)
     implementation(files("libs/sherpa-onnx-1.12.10.aar"))         // neural voices (downloaded by CI)
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")          // Claude API calls

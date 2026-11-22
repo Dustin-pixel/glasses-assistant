@@ -38,6 +38,12 @@ jobs:
           curl -fsSL -o app/libs/sherpa-onnx-1.12.10.aar \
             https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.12.10/sherpa-onnx-1.12.10.aar
 
+      - name: Fetch the hand gesture model (MediaPipe, Apache 2.0)
+        run: |
+          mkdir -p app/src/main/assets
+          curl -fsSL -o app/src/main/assets/gesture_recognizer.task \
+            https://storage.googleapis.com/mediapipe-models/gesture_recognizer/gesture_recognizer/float16/1/gesture_recognizer.task
+
       - name: Build debug APK
         run: gradle :app:assembleDebug --no-daemon --stacktrace
 

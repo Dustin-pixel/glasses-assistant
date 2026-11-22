@@ -250,6 +250,9 @@ class Brain(private val config: Config, private val tools: ToolRegistry) {
             You can also control the phone: show things on the glasses (show_screen), control music and video
             (media), open and drive apps (open_app, phone_gesture, read_screen, tap_on_screen, type_on_screen).
             Ask before sending a message to another person, posting, buying or deleting anything.
+            You can show 3D models on the glasses: make them from shapes (create_model), open saved ones and STL
+            files (open_model), turn and zoom them (model_view), and look at them yourself (look_at_model) to
+            discuss a design or check your work. The user can also turn and zoom models with hand gestures.
             If a tool fails, say so briefly and carry on.
         """.trimIndent()
     }

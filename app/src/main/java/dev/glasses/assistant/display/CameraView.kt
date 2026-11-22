@@ -36,6 +36,15 @@ class CameraView(private val context: Context, private val screen: GlassesScreen
 
     private val worker = Executors.newSingleThreadExecutor()
     private var owner: Owner? = null
+    private var analysis: ImageAnalysis? = null
+
+    /** Digital zoom: 1 = the whole middle square of the picture. */
+    @Volatile var zoom = 1f
+        private set
+    fun zoomBy(f: Float) { zoom = (zoom * f).coerceIn(1f, 6f) }
+
+    /** Also receives each upright picture (hand tracking uses it while the camera view is on). */
+    @Volatile var onUpright: ((Bitmap) -> Unit)? = null
     private var provider: ProcessCameraProvider? = null
     private var lastFrameAt = 0L
     @Volatile private var latest: Bitmap? = null
@@ -52,13 +61,14 @@ class CameraView(private val context: Context, private val screen: GlassesScreen
                 val p = future.get()
                 provider = p
                 val o = Owner().also { owner = it }
-                val analysis = ImageAnalysis.Builder()
+                val a = ImageAnalysis.Builder()
                     .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                     .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
                     .build()
-                analysis.setAnalyzer(worker) { onFrame(it) }
+                    .also { analysis = it }
+                a.setAnalyzer(worker) { onFrame(it) }
                 o.registry.currentState = Lifecycle.State.RESUMED
-                p.bindToLifecycle(o, CameraSelector.DEFAULT_BACK_CAMERA, analysis)
+                p.bindToLifecycle(o, CameraSelector.DEFAULT_BACK_CAMERA, a)
             } catch (t: Throwable) {
                 Log.e(TAG, "Camera view failed to start", t)
                 stop()
@@ -71,7 +81,8 @@ class CameraView(private val context: Context, private val screen: GlassesScreen
     fun stop() {
         if (!running) return
         running = false
-        runCatching { provider?.unbindAll() }
+        analysis?.let { a -> runCatching { provider?.unbind(a) } }   // only ours: hand tracking may be bound too
+        analysis = null
         owner?.registry?.currentState = Lifecycle.State.DESTROYED
         owner = null
         latest = null
@@ -94,6 +105,7 @@ class CameraView(private val context: Context, private val screen: GlassesScreen
             val upright = if (rot == 0) raw else
                 Bitmap.createBitmap(raw, 0, 0, raw.width, raw.height, Matrix().apply { postRotate(rot.toFloat()) }, true)
             latest = upright
+            onUpright?.invoke(upright)
             screen.offer(Source.Camera, square(upright))
         } catch (t: Throwable) {
             Log.w(TAG, "Camera frame failed", t)
@@ -105,7 +117,7 @@ class CameraView(private val context: Context, private val screen: GlassesScreen
     /** The middle square of the picture, scaled to the round display. */
     private fun square(src: Bitmap): Bitmap {
         val n = GlassesScreen.SIZE
-        val side = minOf(src.width, src.height)
+        val side = (minOf(src.width, src.height) / zoom).toInt().coerceAtLeast(8)
         val from = Rect((src.width - side) / 2, (src.height - side) / 2, (src.width + side) / 2, (src.height + side) / 2)
         val out = Bitmap.createBitmap(n, n, Bitmap.Config.ARGB_8888)
         Canvas(out).apply {
