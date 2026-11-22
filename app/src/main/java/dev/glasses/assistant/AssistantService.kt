@@ -27,6 +27,7 @@ import dev.glasses.assistant.brain.ShowScreenTool
 import dev.glasses.assistant.brain.TapTool
 import dev.glasses.assistant.brain.TypeTool
 import dev.glasses.assistant.control.ControlService
+import dev.glasses.assistant.display.CameraView
 import dev.glasses.assistant.display.Crop
 import dev.glasses.assistant.display.GlassesScreen
 import dev.glasses.assistant.display.MirrorConsentActivity
@@ -106,7 +107,14 @@ class AssistantService : Service() {
         screen = GlassesScreen(link, scope)
         nowPlaying = NowPlayingCard(this, screen) { config.skin }
         textCard = TextCard(screen) { config.skin }
-        scope.launch { screen.source.collect { s -> _state.update { it.copy(display = s) } } }
+        cameraView = CameraView(this, screen)
+        scope.launch {
+            screen.source.collect { s ->
+                _state.update { it.copy(display = s) }
+                // The camera runs only while its view is showing (also when a text card hands back to it).
+                if (s == Source.Camera) onMain { startCameraView() } else onMain { cameraView.stop() }
+            }
+        }
 
         val tools = ToolRegistry(
             listOf(
@@ -159,6 +167,7 @@ class AssistantService : Service() {
             }
             ACTION_DISPLAY -> when (intent.getStringExtra(EXTRA_MODE)) {
                 "now_playing" -> displayControl.showNowPlaying()
+                "camera" -> displayControl.showCamera()
                 "mirror" -> displayControl.showMirror(Crop.Auto, null, null)
                 else -> displayControl.showOff()
             }
@@ -388,7 +397,30 @@ class AssistantService : Service() {
     @Volatile private var mirror: ScreenMirror? = null
     private var mirrorWanted: Triple<Crop, Float?, Float?>? = null
 
+    private lateinit var cameraView: CameraView
+
+    private fun startCameraView() {
+        if (cameraView.running || screen.source.value != Source.Camera) return
+        cameraView.start { problem ->
+            link.send(Protocol.overlay("Camera didn't start", ttlMs = 3000))
+            _state.update { it.copy(error = "Camera view: $problem") }
+            if (screen.source.value == Source.Camera) screen.setSource(Source.None)
+        }
+    }
+
+    private fun onMain(block: () -> Unit) =
+        androidx.core.content.ContextCompat.getMainExecutor(this).execute(block)
+
     private val displayControl = object : DisplayControl {
+        override fun showCamera(): String {
+            if (!phoneCamera.hasPermission()) {
+                return "The app doesn't have camera permission. Tell the user to allow it: stop and start the assistant in the app."
+            }
+            textCard.stop()
+            screen.setSource(Source.Camera)   // the source watcher starts the camera
+            return "Showing the phone's back camera on the glasses."
+        }
+
         override fun showNowPlaying(): String {
             textCard.stop()
             screen.setSource(Source.NowPlaying)
@@ -429,12 +461,13 @@ class AssistantService : Service() {
 
     private fun cycleDisplay() {
         when (screen.source.value) {
-            Source.None -> displayControl.showNowPlaying()
+            Source.None -> displayControl.showCamera()
+            Source.Camera -> displayControl.showNowPlaying()
             Source.NowPlaying -> displayControl.showMirror(Crop.Auto, null, null)
             else -> displayControl.showOff()
         }
         link.send(Protocol.overlay(when (screen.source.value) {
-            Source.NowPlaying -> "Now playing"; Source.Mirror -> "Screen"; else -> "Display off"
+            Source.Camera -> "Camera"; Source.NowPlaying -> "Now playing"; Source.Mirror -> "Screen"; else -> "Display off"
         }, ttlMs = 1200))
     }
 
@@ -443,7 +476,7 @@ class AssistantService : Service() {
         when (screen.source.value) {
             Source.NowPlaying -> nowPlaying.start(scope)
             Source.Mirror -> mirror?.refresh()
-            else -> {}
+            else -> {}   // the camera view sends a fresh picture every moment anyway
         }
     }
 
@@ -525,7 +558,8 @@ class AssistantService : Service() {
             if (source == "glasses") throw java.io.IOException("Glasses camera: $glassesProblem")
             Log.i(TAG, "Glasses camera unavailable ($glassesProblem); using the phone camera")
         }
-        val jpeg = phoneCamera.capture()
+        // While the camera view is on, use its latest picture rather than opening the camera twice.
+        val jpeg = cameraView.snapshot() ?: phoneCamera.capture()
         return dev.glasses.assistant.brain.Photo(jpeg,
             "Photo from the PHONE's back camera just now (the glasses camera isn't being used), " +
                 "so it shows wherever the phone is pointed.")

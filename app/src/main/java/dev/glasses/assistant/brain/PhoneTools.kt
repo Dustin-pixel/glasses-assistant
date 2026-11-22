@@ -19,6 +19,7 @@ import org.json.JSONObject
 /** What the display tools need from the assistant service. */
 interface DisplayControl {
     fun showNowPlaying(): String
+    fun showCamera(): String
     fun showMirror(crop: Crop, zoom: Float?, pan: Float?): String
     fun showText(title: String, text: String): String
     fun showOff(): String
@@ -37,14 +38,15 @@ private fun noControl() = ToolResult.Text(
 class ShowScreenTool(private val display: DisplayControl) : Tool {
     override val name = "show_screen"
     override val description =
-        "Choose what fills the glasses display. now_playing: a card for the music or video playing (Spotify, " +
+        "Choose what fills the glasses display. camera: a live view from the camera (the phone's back camera " +
+            "while the glasses camera is out), like seeing through the glasses. now_playing: a card for the music or video playing (Spotify, " +
             "YouTube Music...). mirror: the phone screen itself, for watching YouTube or TikTok or glancing at any " +
             "app (the first time, the user has to tap Start on the phone). text: show longer text you provide, " +
             "paged to fit the round screen, e.g. a reply read from the Claude app. off: back to the normal display."
     override val inputSchema = JSONObject()
         .put("type", "object")
         .put("properties", JSONObject()
-            .put("mode", enumSchema("What to show", "now_playing", "mirror", "text", "off"))
+            .put("mode", enumSchema("What to show", "camera", "now_playing", "mirror", "text", "off"))
             .put("crop", enumSchema(
                 "mirror only. auto picks by app: fill (a square from the middle, for TikTok/Reels/Shorts), " +
                     "video (the video strip in YouTube), fit (whole screen, small), zoom (closer look at part of it)",
@@ -58,6 +60,7 @@ class ShowScreenTool(private val display: DisplayControl) : Tool {
     override suspend fun run(input: JSONObject): ToolResult = ToolResult.Text(
         when (input.getString("mode")) {
             "now_playing" -> display.showNowPlaying()
+            "camera" -> display.showCamera()
             "mirror" -> display.showMirror(
                 when (input.optString("crop", "auto")) {
                     "fit" -> Crop.Fit; "fill" -> Crop.Fill; "video" -> Crop.Video; "zoom" -> Crop.Zoom

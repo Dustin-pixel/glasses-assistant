@@ -15,7 +15,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 import java.io.ByteArrayOutputStream
 
 /** What the glasses display is filled with. */
-enum class Source { None, NowPlaying, Mirror, Text }
+enum class Source { None, Camera, NowPlaying, Mirror, Text }
 
 /**
  * Streams pictures to the glasses display: whatever the current [Source] draws becomes a 240x240 JPEG.

@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -96,11 +97,13 @@ private fun DisplayCard() {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("Glasses display", style = MaterialTheme.typography.titleMedium)
             Text("Or just ask: \"show what's playing\", \"put my screen on the glasses\", \"stop showing that\". " +
-                "Double-press the glasses button to switch.", style = MaterialTheme.typography.bodySmall)
+                "Double-press the glasses button to switch: camera, now playing, screen, normal.", style = MaterialTheme.typography.bodySmall)
             if (state.running) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     FilterChip(selected = state.display == Source.None, onClick = { AssistantService.display(context, "off") },
                         label = { Text("Normal") })
+                    FilterChip(selected = state.display == Source.Camera, onClick = { AssistantService.display(context, "camera") },
+                        label = { Text("Camera") })
                     FilterChip(selected = state.display == Source.NowPlaying, onClick = { AssistantService.display(context, "now_playing") },
                         label = { Text("Now playing") })
                     FilterChip(selected = state.display == Source.Mirror, onClick = { AssistantService.display(context, "mirror") },
